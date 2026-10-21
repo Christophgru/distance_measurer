@@ -40,6 +40,16 @@ The inspection command validates files and timelines, prints sensor rates and
 image timing, and supports JSON output and acceleration plots. See
 [dataset inspection](docs/architecture/dataset_inspection.md) for details.
 
+The [calibration tools](tools/calibration/README.md) implement the lecture's
+homogeneous camera model, eigenvector calibration, and intrinsic/extrinsic matrix
+decomposition. Start with the reproducible synthetic example or inspect a phone's
+approximate K:
+
+```bash
+python tools/calibration/synthetic_demo.py
+python python/scripts/inspect_camera.py data/raw/measurement01
+```
+
 ---
 
 ## Why this project exists

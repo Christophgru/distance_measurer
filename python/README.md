@@ -56,3 +56,22 @@ for warning in report.warnings:
 
 See [dataset_inspection.md](../docs/architecture/dataset_inspection.md) for error
 handling, schema details, and interpretation of diagnostics.
+
+## Camera model and calibration
+
+```bash
+python tools/calibration/synthetic_demo.py
+python python/scripts/inspect_camera.py data/raw/measurement01
+```
+
+Run those commands from the repository root with the environment active. The
+camera package models internal K, world-to-camera extrinsics, homogeneous points,
+the 3×4 projection matrix M, and radial/tangential distortion. It implements the
+lecture's known-3D eigenvector/RQ calibration plus multi-view checkerboard
+calibration. Image/point undistortion preserves the stored-pixel coordinate frame.
+
+[Calibration instructions](../tools/calibration/README.md) explain target capture,
+YAML export, calibration profile matching, and explicitly approximate metadata or
+heuristic fallbacks. [Camera model](../docs/math/camera_model.md) and
+[calibration math](../docs/math/camera_calibration.md) map equations and module
+names to the local lecture without distributing lecture material.

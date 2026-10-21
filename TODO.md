@@ -326,9 +326,17 @@ The script provides enough information to detect an obviously bad recording.
 
 For this milestone use the variable names and comment references of the Matrices as given in local/lecture/002 - Image Formation and Acquisition.pptx
 
+Implemented with lecture-slide references and original notes under `docs/math/`:
+homogeneous coordinates, K, external T_scene, 3×4 M, normalized 3D DLT using the
+minimum eigenvector, and RQ decomposition. The checkerboard tool uses the related
+multi-view planar method and nonlinear lens-distortion refinement. The Python
+suite passes 189 tests; see `docs/experiments/m3_calibration_validation.md`.
+`measurement01` currently uses approximate metadata-derived K until a matching
+physical checkerboard calibration is captured.
+
 ## T3.1 Implement camera intrinsic model
 
-[ ] Add a camera-intrinsics class containing:
+[x] Add a camera-intrinsics class containing:
 
 - `fx`
 - `fy`
@@ -343,7 +351,7 @@ Projection/unit tests cover known points.
 
 ## T3.2 Calibration utility
 
-[ ] Add a checkerboard or Charuco calibration tool under:
+[x] Add a checkerboard or Charuco calibration tool under:
 
 ```text
 tools/calibration/
@@ -355,7 +363,7 @@ It can create a YAML calibration file from a folder of calibration images.
 
 ## T3.3 Undistortion
 
-[ ] Implement image/point undistortion.
+[x] Implement image/point undistortion.
 
 **Acceptance**
 
@@ -363,7 +371,7 @@ Synthetic distortion/undistortion test stays below defined numerical error.
 
 ## T3.4 Metadata fallback intrinsics
 
-[ ] Estimate intrinsics from phone metadata if no calibration file exists.
+[x] Estimate intrinsics from phone metadata if no calibration file exists.
 
 Mark them as approximate.
 
