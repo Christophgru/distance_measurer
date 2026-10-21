@@ -91,3 +91,18 @@ frames, feature IDs, complete matches and masks. Raw data stays untouched.
 
 See [command/output details](../docs/architecture/feature_matching.md) and
 [math with lecture pages](../docs/math/feature_matching.md).
+
+## Relative camera poses
+
+```bash
+python python/scripts/estimate_poses.py data/processed/measurement01/m4 \
+    --output data/processed/measurement01/m5
+```
+
+M5 reuses M4's undistorted coordinates and K, estimates E, chooses the valid R/t
+through explicit SVD and cheirality, and chains adjacent poses. JSON/NPZ exports
+retain mask alignment and failures. A camera-frame figure labels the unresolved
+relative baseline scales; loop disagreement is reported as a quality warning.
+
+See [pose usage](../docs/architecture/relative_pose.md) and
+[equations with lecture pages](../docs/math/relative_pose.md).

@@ -60,6 +60,17 @@ python python/scripts/match_session.py data/raw/measurement01 \
 See [M4 usage](docs/architecture/feature_matching.md) and the
 [lecture-linked matching notes](docs/math/feature_matching.md).
 
+Recover relative rotations and translation directions, then plot three camera frames:
+
+```bash
+python python/scripts/estimate_poses.py data/processed/measurement01/m4 \
+    --output data/processed/measurement01/m5
+```
+
+The [pose command](docs/architecture/relative_pose.md) reports cheirality, parallax
+and rotation-loop consistency. Baseline lengths remain independently unresolved;
+the camera plot uses explicitly arbitrary unit steps.
+
 ---
 
 ## Why this project exists

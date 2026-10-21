@@ -450,9 +450,18 @@ Each output distinguishes geometrically accepted matches.
 
 # M5 — Relative camera pose
 
+Implemented with page-specific lecture comments and original derivations in
+`docs/math/relative_pose.md`: calibrated E, minimum-eigenvector consensus fit,
+explicit SVD/four-way cheirality, parallax checks, and external-transform chaining.
+The Python suite passes 276 tests; see `docs/experiments/m5_pose_validation.md`.
+All three `measurement01` camera frames can be rendered, with independent unit
+baselines clearly labeled. Its 17° rotation-loop disagreement is reported as an
+inconsistency; this is not yet a verified three-view or metric reconstruction.
+Usage/output details are in `docs/architecture/relative_pose.md`.
+
 ## T5.1 Essential matrix estimation
 
-[ ] Given calibrated points, estimate `E`.
+[x] Given calibrated points, estimate `E`.
 
 **Acceptance**
 
@@ -460,7 +469,7 @@ Synthetic test with known camera motion recovers a valid essential matrix up to 
 
 ## T5.2 Relative pose recovery
 
-[ ] Recover:
+[x] Recover:
 
 - relative rotation,
 - translation direction.
@@ -473,7 +482,7 @@ Synthetic camera rotation is recovered within a defined angular tolerance.
 
 ## T5.3 Three-camera pose chaining
 
-[ ] Establish a first world frame:
+[x] Establish a first world frame:
 
 ```text
 camera 0:
