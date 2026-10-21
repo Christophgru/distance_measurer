@@ -136,3 +136,17 @@ the first camera and first baseline length fixed. The output preserves IDs and
 observations, updates reprojection errors, and records solver/quality diagnostics.
 See [usage](../docs/architecture/bundle_adjustment.md) and
 [equations with lecture pages](../docs/math/bundle_adjustment.md).
+
+## Desktop viewer and stable point selection
+
+```bash
+python python/scripts/view_scene.py data/processed/measurement01/m7/scene.json
+python python/scripts/view_scene.py data/processed/measurement01/m7/scene.json \
+    --no-window --list-points
+```
+
+The Open3D viewer draws all sparse points and colored camera frustums/centers.
+`--point-ids A B` selects persistent IDs, with optional `--selection-output PATH`.
+For headless use, add `--no-window --preview PATH.png` to export the labeled scene
+and camera-detail panels. See [usage](../docs/architecture/scene_viewer.md) and
+[geometry with lecture pages](../docs/math/scene_viewer.md).

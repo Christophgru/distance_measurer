@@ -612,9 +612,17 @@ Before/after reprojection error is printed.
 
 # M8 — Desktop 3D visualization
 
+Implemented with lecture-page comments in the inverse-K ray/frustum geometry and
+original notes in `docs/math/scene_viewer.md`. Open3D displays sparse points,
+distinct colored camera centers/frustums and forward axes. A headless preview
+adds camera-ID labels; CLI listing and one/two-point selection preserve stable IDs
+and source hashes. The Python suite passes 375 tests; actual Open3D rendering was
+verified under a virtual display. See `docs/experiments/m8_viewer_validation.md`
+and `docs/architecture/scene_viewer.md`. Scale and quality warnings remain explicit.
+
 ## T8.1 Open3D viewer
 
-[ ] Show:
+[x] Show:
 
 - sparse point cloud,
 - camera centers,
@@ -626,7 +634,7 @@ A user can visually distinguish all three cameras.
 
 ## T8.2 Point IDs
 
-[ ] Preserve stable point IDs through scene serialization and visualization.
+[x] Preserve stable point IDs through scene serialization and visualization.
 
 **Acceptance**
 
@@ -634,7 +642,7 @@ A selected/logged point can be referenced in later measurement commands.
 
 ## T8.3 Point selection
 
-[ ] Allow selecting one or two reconstructed points.
+[x] Allow selecting one or two reconstructed points.
 
 If direct interactive selection is awkward in the first version, a CLI fallback using point IDs is acceptable.
 

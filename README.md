@@ -93,6 +93,18 @@ python python/scripts/refine_scene.py data/processed/measurement01/m6/scene.json
 losses, gauge constraints and before/after diagnostics. The result remains in
 arbitrary visual units with unverified calibration/geometry.
 
+Open the sparse scene in the desktop viewer, or export a headless preview:
+
+```bash
+python python/scripts/view_scene.py data/processed/measurement01/m7/scene.json
+python python/scripts/view_scene.py data/processed/measurement01/m7/scene.json \
+    --no-window --preview data/processed/measurement01/m8/scene_preview.png
+```
+
+Use `--no-window --list-points` to discover stable IDs and `--point-ids A B` to
+highlight a selection. [Viewer instructions](docs/architecture/scene_viewer.md)
+cover camera colors, ID export and display requirements.
+
 ---
 
 ## Why this project exists
