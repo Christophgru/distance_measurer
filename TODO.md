@@ -15,7 +15,7 @@ Legend:
 
 ## T0.1 Create repository skeleton
 
-[ ] Create the folder structure described in `README.md`.
+[x] Create the folder structure described in `README.md`.
 
 **Acceptance**
 
@@ -25,7 +25,7 @@ Legend:
 
 ## T0.2 Add Python project metadata
 
-[ ] Add `python/pyproject.toml`.
+[x] Add `python/pyproject.toml`.
 
 Use Python 3.12+ and initial dependencies:
 
@@ -53,7 +53,7 @@ all succeed.
 
 ## T0.3 Add formatting/linting
 
-[ ] Configure Ruff.
+[x] Configure Ruff.
 
 **Acceptance**
 
@@ -312,6 +312,8 @@ The script provides enough information to detect an obviously bad recording.
 ---
 
 # M3 — Camera model and calibration
+
+For this milestone use the variable names and comment references of the Matrices as given in local/lecture/002 - Image Formation and Acquisition.pptx
 
 ## T3.1 Implement camera intrinsic model
 

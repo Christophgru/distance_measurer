@@ -1,0 +1,30 @@
+# Private lecture material must never be committed.
+/local/lecture/
+
+# Captured sessions and generated reconstructions stay local.
+/data/raw/*
+!/data/raw/.gitkeep
+/data/processed/*
+!/data/processed/.gitkeep
+
+# Python environments, build products, and caches.
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Android build products and machine-specific SDK configuration.
+.gradle/
+.kotlin/
+/android/local.properties
+
+# Editor and operating-system files.
+.idea/
+.vscode/
+.DS_Store

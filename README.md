@@ -23,6 +23,12 @@ The project starts deliberately small:
 
 Once the geometry and scale estimation work reliably, the reconstruction code can be moved into or behind a polished Android app.
 
+## Development setup
+
+The Python package requires Python 3.12 or newer. See [python/README.md](python/README.md)
+for environment setup, editable installation, tests, and Ruff checks. The Android
+capture app is planned for M1; its directory currently contains a placeholder.
+
 ---
 
 ## Why this project exists
