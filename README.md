@@ -50,6 +50,16 @@ python tools/calibration/synthetic_demo.py
 python python/scripts/inspect_camera.py data/raw/measurement01
 ```
 
+Extract and verify sparse correspondences, then inspect the rectified match images:
+
+```bash
+python python/scripts/match_session.py data/raw/measurement01 \
+    --output data/processed/measurement01/m4
+```
+
+See [M4 usage](docs/architecture/feature_matching.md) and the
+[lecture-linked matching notes](docs/math/feature_matching.md).
+
 ---
 
 ## Why this project exists

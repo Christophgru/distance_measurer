@@ -75,3 +75,19 @@ YAML export, calibration profile matching, and explicitly approximate metadata o
 heuristic fallbacks. [Camera model](../docs/math/camera_model.md) and
 [calibration math](../docs/math/camera_calibration.md) map equations and module
 names to the local lecture without distributing lecture material.
+
+## Feature matching and rectification
+
+```bash
+python python/scripts/match_session.py data/raw/measurement01 \
+    --output data/processed/measurement01/m4
+```
+
+This selects images 0, 1, 2, extracts SIFT features, applies the Lowe ratio and
+mutual nearest-neighbor filters, verifies F with RANSAC, and saves rectified
+diagnostics for pairs 0–1, 1–2, 0–2. Green and red rows distinguish accepted and
+rejected matches. JSON and NPZ exports retain calibration sources, coordinate
+frames, feature IDs, complete matches and masks. Raw data stays untouched.
+
+See [command/output details](../docs/architecture/feature_matching.md) and
+[math with lecture pages](../docs/math/feature_matching.md).

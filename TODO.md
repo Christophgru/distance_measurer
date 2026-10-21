@@ -387,9 +387,18 @@ The pipeline clearly prints which intrinsic source was used:
 
 # M4 — Feature extraction and matching
 
+Implemented with lecture page references in code and original notes under
+`docs/math/feature_matching.md`: sparse correspondence, epipolar verification,
+and projective rectification. SIFT/ratio/RANSAC are identified as extensions to
+the deck's block-matching examples. The full Python suite passes 237 tests.
+All three requested pairs in `measurement01` produce rectified accepted/rejected
+match previews; see `docs/experiments/m4_matching_validation.md` and
+`docs/architecture/feature_matching.md`. Intrinsics remain explicitly approximate
+until a matching physical camera calibration is supplied.
+
 ## T4.1 Feature extraction interface
 
-[ ] Implement a backend interface.
+[x] Implement a backend interface.
 
 First backend: SIFT.
 
@@ -405,7 +414,7 @@ Running twice on the same image is deterministic enough for regression testing.
 
 ## T4.2 Pairwise matcher
 
-[ ] Match descriptors for image pairs.
+[x] Match descriptors for image pairs.
 
 Initial filters:
 
@@ -419,7 +428,7 @@ Debug output reports raw and retained match counts.
 
 ## T4.3 Geometric verification
 
-[ ] Use RANSAC with fundamental or essential matrix estimation.
+[x] Use RANSAC with fundamental or essential matrix estimation.
 
 **Acceptance**
 
@@ -427,7 +436,7 @@ Outlier matches are marked separately in a debug visualization.
 
 ## T4.4 Match visualization
 
-[ ] Write debug images for:
+[x] Write rectified debug images for:
 
 - image 0 ↔ 1
 - image 1 ↔ 2
