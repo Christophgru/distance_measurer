@@ -252,9 +252,13 @@ A new developer can capture a session and manually copy it into the repository u
 
 # M2 — Dataset contract and inspection
 
+Verified against the local `data/raw/measurement01` capture: five decodable images,
+all three sensor streams, and no validation errors. The Python suite has 121 passing
+tests. See `docs/experiments/measurement01_inspection.md` for aggregate results.
+
 ## T2.1 Define Python schema models
 
-[ ] Implement schema/data classes for:
+[x] Implement schema/data classes for:
 
 - session
 - sensor sample
@@ -267,7 +271,7 @@ Malformed required fields produce clear errors.
 
 ## T2.2 Implement session loader
 
-[ ] Implement:
+[x] Implement:
 
 ```python
 load_session(path)
@@ -281,7 +285,7 @@ A valid captured Android session loads with one call.
 
 ## T2.3 Validate timelines
 
-[ ] Validate:
+[x] Validate:
 
 - timeline start < image timestamps < timeline end,
 - monotonically increasing sensor timestamps,
@@ -295,7 +299,7 @@ Each invalid condition has a regression test.
 
 ## T2.4 Session inspection script
 
-[ ] Add:
+[x] Add:
 
 ```bash
 python python/scripts/inspect_session.py data/raw/<session>

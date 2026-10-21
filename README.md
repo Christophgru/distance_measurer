@@ -30,6 +30,16 @@ for environment setup, editable installation, tests, and Ruff checks. See
 [android/README.md](android/README.md) to build the capture app, record a timeline,
 and copy a session into `data/raw/`.
 
+With the Python environment active, inspect a copied recording:
+
+```bash
+python python/scripts/inspect_session.py data/raw/measurement01
+```
+
+The inspection command validates files and timelines, prints sensor rates and
+image timing, and supports JSON output and acceleration plots. See
+[dataset inspection](docs/architecture/dataset_inspection.md) for details.
+
 ---
 
 ## Why this project exists
