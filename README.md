@@ -71,6 +71,17 @@ The [pose command](docs/architecture/relative_pose.md) reports cheirality, paral
 and rotation-loop consistency. Baseline lengths remain independently unresolved;
 the camera plot uses explicitly arbitrary unit steps.
 
+Build feature tracks and triangulate a persistent sparse scene:
+
+```bash
+python python/scripts/reconstruct_scene.py \
+    data/processed/measurement01/m4 data/processed/measurement01/m5 \
+    --output data/processed/measurement01/m6
+```
+
+See [scene usage and format](docs/architecture/sparse_reconstruction.md). Rejected
+tracks and inherited pose/scale warnings remain in the output.
+
 ---
 
 ## Why this project exists

@@ -12,14 +12,22 @@ from .pose import (
     estimate_essential_linear,
     recover_relative_pose,
 )
+from .tracks import FeatureTrack, MatchEdge, TrackBuildResult, TrackConflict, build_tracks
+from .triangulation import TriangulationResult, triangulate_point
 
 __all__ = [
     "DescriptorMatches",
     "EssentialEstimate",
     "FeatureBackend",
+    "FeatureTrack",
     "Features",
+    "MatchEdge",
     "RelativePose",
     "SiftBackend",
+    "TrackBuildResult",
+    "TrackConflict",
+    "TriangulationResult",
+    "build_tracks",
     "chain_camera",
     "decompose_essential",
     "estimate_essential",
@@ -29,4 +37,5 @@ __all__ = [
     "rectify_matches",
     "recover_relative_pose",
     "sampson_errors",
+    "triangulate_point",
 ]

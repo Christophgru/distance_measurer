@@ -502,9 +502,18 @@ All three camera frames can be rendered in one coordinate system.
 
 # M6 — Feature tracks and sparse reconstruction
 
+Implemented with page-specific lecture comments and original notes in
+`docs/math/sparse_reconstruction.md`: conflict-checked tracks, all-view linear
+triangulation through K/[R|O]/3×4 M, SVD or minimum eigenvectors, and persistent
+scene JSON with reciprocal point/track references. The Python suite passes
+330 tests. `measurement01` retains 206 points from 238 tracks; 32 tracks fail
+reprojection checks. Its unresolved baseline scales and 17° pose-loop warning
+are preserved. See `docs/experiments/m6_reconstruction_validation.md` and
+`docs/architecture/sparse_reconstruction.md`.
+
 ## T6.1 Track builder
 
-[ ] Merge pairwise matches into multi-image feature tracks.
+[x] Merge pairwise matches into multi-image feature tracks.
 
 Prevent invalid tracks containing:
 
@@ -517,7 +526,7 @@ Unit tests cover track merging and conflict rejection.
 
 ## T6.2 Triangulation
 
-[ ] Implement linear triangulation.
+[x] Implement linear triangulation.
 
 Reject points:
 
@@ -531,7 +540,7 @@ Synthetic 3D points reconstruct up to expected numerical tolerance.
 
 ## T6.3 Scene model
 
-[ ] Implement persistent scene objects for:
+[x] Implement persistent scene objects for:
 
 - cameras,
 - 3D points,

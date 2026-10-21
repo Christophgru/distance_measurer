@@ -106,3 +106,20 @@ relative baseline scales; loop disagreement is reported as a quality warning.
 
 See [pose usage](../docs/architecture/relative_pose.md) and
 [equations with lecture pages](../docs/math/relative_pose.md).
+
+## Sparse tracks and scene
+
+```bash
+python python/scripts/reconstruct_scene.py \
+    data/processed/measurement01/m4 data/processed/measurement01/m5 \
+    --output data/processed/measurement01/m6
+```
+
+M6 merges pose-inlier correspondences without conflicting image features, then
+triangulates all views of each track. It rejects poor depth, reprojection and
+intersection geometry. JSON retains cameras, points, observations, rejected
+tracks, metadata and M5's scale/quality warnings. Load with
+`distance_measuring.scene.load_scene`.
+
+See [usage/schema](../docs/architecture/sparse_reconstruction.md) and
+[math with lecture pages](../docs/math/sparse_reconstruction.md).
