@@ -26,8 +26,9 @@ Once the geometry and scale estimation work reliably, the reconstruction code ca
 ## Development setup
 
 The Python package requires Python 3.12 or newer. See [python/README.md](python/README.md)
-for environment setup, editable installation, tests, and Ruff checks. The Android
-capture app is planned for M1; its directory currently contains a placeholder.
+for environment setup, editable installation, tests, and Ruff checks. See
+[android/README.md](android/README.md) to build the capture app, record a timeline,
+and copy a session into `data/raw/`.
 
 ---
 

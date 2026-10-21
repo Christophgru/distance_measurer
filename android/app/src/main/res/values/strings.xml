@@ -1,0 +1,11 @@
+<resources>
+    <string name="app_name">Distance capture</string>
+    <string name="start_timeline">Start timeline</string>
+    <string name="take_picture">Take picture</string>
+    <string name="end_timeline">End timeline</string>
+    <string name="initial_status">Status: preparing camera</string>
+    <string name="image_count">Images: %1$d</string>
+    <string name="sensor_count">Sensor samples: %1$d</string>
+    <string name="camera_permission">Camera access is required. Allow it in Android Settings, then reopen the app.</string>
+    <string name="preview_description">Camera preview</string>
+</resources>

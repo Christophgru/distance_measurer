@@ -69,9 +69,16 @@ passes on a clean checkout.
 
 Goal: create trustworthy raw datasets, not a polished UI.
 
+Implementation lives in `android/`; build/export instructions and the physical-device
+acceptance checklist are in `android/README.md`. Tasks marked `[~]` have an
+implementation but still require validation on a physical phone.
+
+Automated verification: `:app:assembleDebug`, `:app:testDebugUnitTest` (15 tests),
+and `:app:lintDebug` pass through the Gradle wrapper on JDK 17 / Android SDK 35.
+
 ## T1.1 Create Android project
 
-[ ] Create a minimal Kotlin Android application in `android/`.
+[~] Create a minimal Kotlin Android application in `android/`.
 
 Preferred stack:
 
@@ -88,7 +95,7 @@ Preferred stack:
 
 ## T1.2 Implement minimal UI
 
-[ ] Add:
+[x] Add:
 
 - `Start timeline`
 - `Take picture`
@@ -108,7 +115,7 @@ State transitions cannot accidentally create overlapping sessions.
 
 ## T1.3 Create session directory
 
-[ ] On `Start timeline`, create a unique directory containing:
+[x] On `Start timeline`, create a unique directory containing:
 
 ```text
 session.json
@@ -125,7 +132,7 @@ Starting and ending two sessions creates two independent directories.
 
 ## T1.4 Record accelerometer
 
-[ ] Register the Android accelerometer sensor for the complete active timeline.
+[~] Register the Android accelerometer sensor for the complete active timeline.
 
 Write:
 
@@ -143,7 +150,7 @@ Use the sensor event monotonic timestamp.
 
 ## T1.5 Record gyroscope
 
-[ ] Add gyroscope samples to the same timeline.
+[~] Add gyroscope samples to the same timeline.
 
 **Acceptance**
 
@@ -151,7 +158,7 @@ The CSV contains distinguishable `gyroscope` samples with valid monotonic timest
 
 ## T1.6 Record rotation vector
 
-[ ] Record Android rotation-vector sensor when available.
+[x] Record Android rotation-vector sensor when available.
 
 Fallback:
 
@@ -164,7 +171,7 @@ The app does not fail on a device without rotation-vector support.
 
 ## T1.7 Capture JPEG image
 
-[ ] Implement `Take picture`.
+[~] Implement `Take picture`.
 
 Requirements:
 
@@ -179,7 +186,7 @@ Three button presses create exactly three readable JPEG files and three correspo
 
 ## T1.8 Timestamp image capture
 
-[ ] Establish the best available timestamp for each image.
+[x] Establish the best available timestamp for each image.
 
 First implementation may store:
 
@@ -197,7 +204,7 @@ Document the clock domain of every timestamp.
 
 ## T1.9 Persist camera metadata
 
-[ ] Store per-image metadata needed by reconstruction where available:
+[x] Store per-image metadata needed by reconstruction where available:
 
 - width
 - height
@@ -214,7 +221,7 @@ A Python script can read the metadata without Android-specific tooling.
 
 ## T1.10 Finalize session safely
 
-[ ] On `End timeline`:
+[~] On `End timeline`:
 
 - stop listeners,
 - flush/close files,
@@ -229,7 +236,7 @@ A normally ended session is internally consistent and readable after reconnectin
 
 ## T1.11 Manual export workflow
 
-[ ] Document the phone path from which a session should be copied into:
+[x] Document the phone path from which a session should be copied into:
 
 ```text
 data/raw/<session_id>/

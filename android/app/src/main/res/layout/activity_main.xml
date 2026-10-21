@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <androidx.camera.view.PreviewView
+        android:id="@+id/preview"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:contentDescription="@string/preview_description" />
+
+    <TextView android:id="@+id/status"
+        android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:accessibilityLiveRegion="polite" android:text="@string/initial_status" />
+    <TextView android:id="@+id/image_count"
+        android:layout_width="match_parent" android:layout_height="wrap_content" />
+    <TextView android:id="@+id/sensor_count"
+        android:layout_width="match_parent" android:layout_height="wrap_content" />
+    <TextView android:id="@+id/session_path"
+        android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:textIsSelectable="true" android:textSize="12sp" />
+
+    <Button android:id="@+id/start"
+        android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:enabled="false" android:text="@string/start_timeline" />
+    <Button android:id="@+id/capture"
+        android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:enabled="false" android:text="@string/take_picture" />
+    <Button android:id="@+id/end"
+        android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:enabled="false" android:text="@string/end_timeline" />
+</LinearLayout>
