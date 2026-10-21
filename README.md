@@ -82,6 +82,17 @@ python python/scripts/reconstruct_scene.py \
 See [scene usage and format](docs/architecture/sparse_reconstruction.md). Rejected
 tracks and inherited pose/scale warnings remain in the output.
 
+Refine cameras and points with a fixed first pose and first-baseline scale:
+
+```bash
+python python/scripts/refine_scene.py data/processed/measurement01/m6/scene.json \
+    --output data/processed/measurement01/m7
+```
+
+[Bundle-adjustment usage](docs/architecture/bundle_adjustment.md) explains robust
+losses, gauge constraints and before/after diagnostics. The result remains in
+arbitrary visual units with unverified calibration/geometry.
+
 ---
 
 ## Why this project exists

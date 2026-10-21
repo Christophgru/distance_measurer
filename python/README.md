@@ -123,3 +123,16 @@ tracks, metadata and M5's scale/quality warnings. Load with
 
 See [usage/schema](../docs/architecture/sparse_reconstruction.md) and
 [math with lecture pages](../docs/math/sparse_reconstruction.md).
+
+## Bundle adjustment
+
+```bash
+python python/scripts/refine_scene.py data/processed/measurement01/m6/scene.json \
+    --output data/processed/measurement01/m7
+```
+
+M7 uses sparse nonlinear least squares with configurable robust loss, keeping
+the first camera and first baseline length fixed. The output preserves IDs and
+observations, updates reprojection errors, and records solver/quality diagnostics.
+See [usage](../docs/architecture/bundle_adjustment.md) and
+[equations with lecture pages](../docs/math/bundle_adjustment.md).

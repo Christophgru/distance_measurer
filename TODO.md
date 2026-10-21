@@ -556,9 +556,19 @@ Scene can be serialized to JSON and loaded back without meaningful loss.
 
 # M7 — Bundle adjustment
 
+Implemented with page-specific lecture comments and original notes in
+`docs/math/bundle_adjustment.md`: ideal-pixel reprojection, joint sparse robust
+least squares, fixed first pose and exact first-baseline scale, and refined scene
+export with stable IDs and full before/after diagnostics. The Python suite passes
+353 tests. `measurement01` converges in 47 evaluations and reduces observation
+RMSE from 0.86425 to 0.26901 working pixels without dropping observations. Its
+calibration/scale/geometry remain unverified and input warnings are preserved.
+See `docs/experiments/m7_bundle_adjustment_validation.md` and
+`docs/architecture/bundle_adjustment.md`.
+
 ## T7.1 Reprojection residuals
 
-[ ] Implement reprojection residual vector.
+[x] Implement reprojection residual vector.
 
 **Acceptance**
 
@@ -566,7 +576,7 @@ Residual is approximately zero on perfect synthetic observations.
 
 ## T7.2 Optimize cameras and points
 
-[ ] Use `scipy.optimize.least_squares`.
+[x] Use `scipy.optimize.least_squares`.
 
 Fix gauge freedoms:
 
@@ -579,7 +589,7 @@ On noisy synthetic data, optimization lowers total reprojection RMSE.
 
 ## T7.3 Robust loss
 
-[ ] Add configurable robust loss.
+[x] Add configurable robust loss.
 
 **Acceptance**
 
@@ -587,7 +597,7 @@ A small set of outliers does not catastrophically move the whole reconstruction.
 
 ## T7.4 Bundle-adjusted scene export
 
-[ ] Save:
+[x] Save:
 
 - optimized cameras
 - optimized points
