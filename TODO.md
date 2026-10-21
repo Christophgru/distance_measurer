@@ -655,6 +655,11 @@ The user can unambiguously specify point A and point B.
 # M9 — Measurement engine
 
 ## T9.1 Point-to-point distance
+ as reference use the image, it is a ruler and has scales on it in cm. verifiy it fits, if it deviates more tha  10% stop
+
+**Status: stopped at the accuracy gate.** The ruler check exceeds 10% deviation
+and its triangulated ticks fail the reprojection threshold. See the
+[M9 validation record](docs/experiments/m9_ruler_validation.md). M9 remains incomplete.
 
 [ ] Implement:
 

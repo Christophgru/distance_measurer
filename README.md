@@ -105,6 +105,11 @@ Use `--no-window --list-points` to discover stable IDs and `--point-ids A B` to
 highlight a selection. [Viewer instructions](docs/architecture/scene_viewer.md)
 cover camera colors, ID export and display requirements.
 
+M9 is stopped at the requested ruler accuracy check: the independent reference
+exceeds 10% deviation and fails triangulation quality checks. See the
+[reproducible ruler diagnostic](docs/experiments/m9_ruler_validation.md).
+The measurement engine remains pending.
+
 ---
 
 ## Why this project exists
