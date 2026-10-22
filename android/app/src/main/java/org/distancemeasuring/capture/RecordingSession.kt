@@ -67,7 +67,7 @@ class RecordingSession(
         .put("created_at_utc", Instant.now().toString())
         .put("timeline_start_ns", startNs)
         .put("clock_domain", "android_elapsed_realtime_ns")
-        .put("image_timestamp_source", "button_request")
+        .put("image_timestamp_source", "camera_frame_when_realtime_else_button_request")
         .put("sensor_order", "global_nondecreasing_per_stream_strictly_increasing")
         .put("sensor_reorder_window_ns", REORDER_WINDOW_NS)
         .put("notes", "")
@@ -133,18 +133,22 @@ class RecordingSession(
             return false
         }
         require(callbackNs >= ticket.requestNs && callbackNs <= clock()) { "Invalid callback time" }
+        val frameNs = imageMetadata.optLong("sensor_timestamp_ns", -1)
+        val comparable = imageMetadata.optString("sensor_timestamp_clock_domain") ==
+            "android_elapsed_realtime_ns"
+        val useFrame = comparable && frameNs >= ticket.requestNs && frameNs <= callbackNs
         check(ticket.temporaryFile.isFile && ticket.temporaryFile.length() > 0) { "Missing JPEG" }
         check(ticket.temporaryFile.renameTo(ticket.file)) { "Cannot publish JPEG" }
         try {
             event(JSONObject().put("type", "image").put("index", ticket.index)
                 .put("filename", ticket.filename)
-                // This is button-request time, not sensor exposure time. Both clocks below
-                // use elapsedRealtimeNanos, as do Android SensorEvent timestamps.
-                .put("timestamp_ns", ticket.requestNs)
+                // Use the JPEG frame's timestamp only with a declared comparable clock
+                // and plausible bounds. Retain its original value even on fallback.
+                .put("timestamp_ns", if (useFrame) frameNs else ticket.requestNs)
                 .put("request_timestamp_ns", ticket.requestNs)
                 .put("callback_timestamp_ns", callbackNs)
                 .put("clock_domain", "android_elapsed_realtime_ns")
-                .put("timestamp_source", "button_request")
+                .put("timestamp_source", if (useFrame) "camera_frame" else "button_request")
                 .put("metadata", imageMetadata))
         } catch (error: Exception) {
             ticket.file.delete()

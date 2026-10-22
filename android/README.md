@@ -1,8 +1,14 @@
 # Android capture app
 
 One Kotlin Activity uses CameraX to save high-quality JPEGs while recording an
-accelerometer, gyroscope, and optional rotation vector. Requires Android 8.0+
+accelerometer, gyroscope, and optional compass, rotation vector and game rotation
+vector. App 0.2 retains all available streams without fusing them during capture.
+Requires Android 8.0+
 (API 26). Capture runs while the Activity is in the foreground.
+
+App 0.2 builds with `assembleDebug`; its **17 JVM tests** and `lintDebug` pass.
+Compass availability, JPEG metadata/orientation and REALTIME frame timestamps
+still require the physical-device checks below.
 
 ## Build and install
 
@@ -32,11 +38,14 @@ Gradle and Maven dependencies. No Android Studio project generation is required.
 1. Enable USB debugging on a physical phone and authorize its connection. Launch
    **Distance capture** and grant camera access. An accelerometer and gyroscope
    must be present; missing rotation-vector support is allowed.
-2. Tap **Start timeline**, wait briefly, then take three pictures while slowly
-   translating the phone around a textured, stationary scene.
+2. Tap **Start timeline** and hold the phone completely still for at least two
+   seconds. Then take overlapping pictures while slowly translating the phone
+   around a textured, stationary scene. Every selected photo must connect to the
+   others through overlaps; disconnected reconstruction aborts.
 3. Wait for each image counter increment before taking the next picture. Capture
    is serialized, and the picture button is disabled while a JPEG is being saved.
-4. Wait briefly after the last image, tap **End timeline**, and wait for **saved**.
+4. Hold still for at least two seconds after the last image, tap **End timeline**,
+   and wait for **saved**.
    The session path remains visible for copying.
 
 Starting is disabled during recording and finalization. Ending during a photo
@@ -121,6 +130,13 @@ a physical phone; a build alone does not establish hardware capture quality:
   Inspect sample rates, gaps, and `dropped_sensor_samples` on the actual phone.
 - Test a device without a rotation-vector sensor when available: it should store
   `false` in the availability map while the required streams keep recording.
+- Check availability/counts for `magnetometer` (microtesla) and
+  `game_rotation_vector` (xyzw). Their absence must not stop capture.
+- Inspect each JPEG's camera frame timestamp and clock. On REALTIME-clock
+  devices, primary source should be `camera_frame` with plausible request/frame/
+  callback order. Unknown clocks must retain the button-request fallback.
+  Confirm JPEG dimensions, rotation, EXIF exposure/focal length and readability
+  after the captured-buffer save path on the actual phone.
 - End during capture, rotate, background, and close/reopen. Confirm no orphan
   JPEGs, missing end events in normally finalized sessions, or overlapping files.
 - Copy an ended session with the commands above and read it using Python.

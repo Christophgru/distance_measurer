@@ -1,11 +1,40 @@
 package org.distancemeasuring.capture
 
 import android.graphics.BitmapFactory
+import android.graphics.ImageFormat
+import androidx.camera.core.ImageProxy
 import androidx.exifinterface.media.ExifInterface
 import org.json.JSONObject
 import java.io.File
 
 object PhotoMetadata {
+    /** Preserve the JPEG's own frame timestamp; never associate a preview callback by proximity. */
+    fun saveCapturedJpeg(file: File, image: ImageProxy, camera: JSONObject, targetRotation: Int): JSONObject {
+        check(image.format == ImageFormat.JPEG) { "Expected a JPEG camera buffer" }
+        val buffer = image.planes[0].buffer.duplicate()
+        buffer.rewind()
+        val bytes = ByteArray(buffer.remaining())
+        buffer.get(bytes)
+        file.writeBytes(bytes)
+        // CameraX returns unrotated pixels. Store its requested display rotation
+        // in EXIF, preserving the working-pixel convention (lecture 002 pp. 65–76).
+        val exif = ExifInterface(file)
+        val orientation = when (image.imageInfo.rotationDegrees) {
+            0 -> ExifInterface.ORIENTATION_NORMAL
+            90 -> ExifInterface.ORIENTATION_ROTATE_90
+            180 -> ExifInterface.ORIENTATION_ROTATE_180
+            270 -> ExifInterface.ORIENTATION_ROTATE_270
+            else -> error("Unsupported JPEG rotation")
+        }
+        exif.setAttribute(ExifInterface.TAG_ORIENTATION, orientation.toString())
+        exif.saveAttributes()
+        return read(file, camera, targetRotation)
+            .put("sensor_timestamp_ns", image.imageInfo.timestamp.takeIf { it > 0 } ?: JSONObject.NULL)
+            .put("sensor_timestamp_clock_domain", camera.optString("sensor_timestamp_clock_domain", "camera_unknown"))
+            .put("sensor_timestamp_source", "camerax_image_info")
+            .put("metadata_source", "jpeg_exif_camera_characteristics_and_image_info")
+    }
+
     fun read(file: File, camera: JSONObject, targetRotation: Int): JSONObject {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(file.absolutePath, bounds)

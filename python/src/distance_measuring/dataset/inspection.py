@@ -15,7 +15,7 @@ def summarize_session(session: Session, report: ValidationReport) -> dict[str, A
         timestamps = sorted(sample.timestamp_ns for sample in stream)
         span_ns = timestamps[-1] - timestamps[0] if timestamps else 0
         sensors[name] = {
-            "available": session.metadata.sensors[name],
+            "available": session.metadata.sensors.get(name, False),
             "count": len(stream),
             "rate_hz": (len(stream) - 1) * 1e9 / span_ns if span_ns > 0 else None,
             "max_gap_s": max((b - a for a, b in pairwise(timestamps)), default=0) / 1e9,

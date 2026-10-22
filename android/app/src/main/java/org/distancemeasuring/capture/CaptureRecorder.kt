@@ -12,6 +12,7 @@ import android.os.Looper
 import android.os.SystemClock
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
+import androidx.camera.core.ImageProxy
 import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.Executor
@@ -34,6 +35,8 @@ class CaptureRecorder(context: Context, private val onState: (RecordingState) ->
         "accelerometer" to manager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER),
         "gyroscope" to manager.getDefaultSensor(Sensor.TYPE_GYROSCOPE),
         "rotation_vector" to manager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR),
+        "game_rotation_vector" to manager.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR),
+        "magnetometer" to manager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD),
     )
 
     fun start() = dispatch {
@@ -49,14 +52,16 @@ class CaptureRecorder(context: Context, private val onState: (RecordingState) ->
         }, "sessions")
         val recording = RecordingSession(root, JSONObject()
             .put("manufacturer", Build.MANUFACTURER).put("model", Build.MODEL)
-            .put("android_api", Build.VERSION.SDK_INT).put("app_version", "0.1.0"),
+            .put("android_api", Build.VERSION.SDK_INT).put("app_version", "0.2.0"),
             sensors.mapValues { it.value != null }, SystemClock::elapsedRealtimeNanos)
         session = recording
         sensors.forEach { (name, sensor) ->
             // 100 Hz requested, no hardware batching. Actual rates are device dependent.
             val registered = sensor != null && manager.registerListener(this, sensor, 10_000, handler)
             recording.setSensorAvailable(name, registered)
-            check(registered || name == "rotation_vector") { "Cannot register $name" }
+            check(registered || name !in setOf("accelerometer", "gyroscope")) {
+                "Cannot register $name"
+            }
         }
         publish()
     }
@@ -87,32 +92,36 @@ class CaptureRecorder(context: Context, private val onState: (RecordingState) ->
             handler.postDelayed(timeout, 30_000)
             // If destruction/timeout already closed the worker, only delete late output.
             val callbackExecutor = Executor { command ->
-                if (!handler.post(command)) ticket.temporaryFile.delete()
+                // Deliver late callbacks too, so their ImageProxy is always closed.
+                if (!handler.post(command)) command.run()
             }
             main.post {
                 try {
                     imageCapture.targetRotation = targetRotation
                     imageCapture.takePicture(
-                        ImageCapture.OutputFileOptions.Builder(ticket.temporaryFile).build(),
                         callbackExecutor,
-                        object : ImageCapture.OnImageSavedCallback {
-                            override fun onImageSaved(output: ImageCapture.OutputFileResults) {
+                        object : ImageCapture.OnImageCapturedCallback() {
+                            override fun onCaptureSuccess(image: ImageProxy) {
                                 val callbackNs = SystemClock.elapsedRealtimeNanos()
                                 handler.removeCallbacks(timeout)
-                                guarded {
-                                    if (recording.closed || session !== recording) {
-                                        ticket.temporaryFile.delete()
-                                        return@guarded
+                                try {
+                                    guarded {
+                                        if (recording.closed || session !== recording) {
+                                            ticket.temporaryFile.delete()
+                                            return@guarded
+                                        }
+                                        try {
+                                            val metadata = PhotoMetadata.saveCapturedJpeg(
+                                                ticket.temporaryFile, image, cameraMetadata, targetRotation)
+                                            recording.completePhoto(ticket, callbackNs, metadata)
+                                            if (!finishIfReady()) publish()
+                                        } catch (error: Exception) {
+                                            recording.failPhoto(ticket, error.message ?: "Invalid JPEG")
+                                            if (!finishIfReady()) publish("Photo failed: ${error.message}")
+                                        }
                                     }
-                                    try {
-                                        val metadata = PhotoMetadata.read(ticket.temporaryFile,
-                                            cameraMetadata, targetRotation)
-                                        recording.completePhoto(ticket, callbackNs, metadata)
-                                        if (!finishIfReady()) publish()
-                                    } catch (error: Exception) {
-                                        recording.failPhoto(ticket, error.message ?: "Invalid JPEG")
-                                        if (!finishIfReady()) publish("Photo failed: ${error.message}")
-                                    }
+                                } finally {
+                                    image.close()
                                 }
                             }
 
@@ -155,10 +164,12 @@ class CaptureRecorder(context: Context, private val onState: (RecordingState) ->
             Sensor.TYPE_ACCELEROMETER -> "accelerometer"
             Sensor.TYPE_GYROSCOPE -> "gyroscope"
             Sensor.TYPE_ROTATION_VECTOR -> "rotation_vector"
+            Sensor.TYPE_GAME_ROTATION_VECTOR -> "game_rotation_vector"
+            Sensor.TYPE_MAGNETIC_FIELD -> "magnetometer"
             else -> return@guarded
         }
         val values = event.values
-        val w = if (type == "rotation_vector") values.getOrNull(3)
+        val w = if (type in setOf("rotation_vector", "game_rotation_vector")) values.getOrNull(3)
             ?: sqrt(max(0f, 1f - values[0] * values[0] - values[1] * values[1] - values[2] * values[2]))
             else null
         recording.recordSensor(SensorSample(event.timestamp, type,

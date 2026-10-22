@@ -30,6 +30,23 @@ def test_five_images_are_allowed(capture_factory):
     assert len(load_session(capture.path).images) == 5
 
 
+def test_frame_time_requires_matching_metadata_and_comparable_clock(capture):
+    from distance_measuring.dataset.schema import CLOCK_DOMAIN
+
+    image = capture.events[2]
+    image["timestamp_source"] = "camera_frame"
+    image["timestamp_ns"] += 1_000_000
+    image["metadata"].update(
+        sensor_timestamp_ns=image["timestamp_ns"], sensor_timestamp_clock_domain=CLOCK_DOMAIN
+    )
+    assert "image_frame_time" not in error_codes(capture)
+    image["metadata"]["sensor_timestamp_clock_domain"] = "camera_unknown"
+    assert "image_frame_time" in error_codes(capture)
+    image["metadata"]["sensor_timestamp_clock_domain"] = CLOCK_DOMAIN
+    image["metadata"]["sensor_timestamp_ns"] += 1
+    assert "image_frame_time" in error_codes(capture)
+
+
 def test_rotation_vector_unavailable_is_warning(capture_factory):
     capture = capture_factory(rotation_vector=False)
     session = load_session(capture.path)

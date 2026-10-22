@@ -26,6 +26,44 @@ class RecordingSessionTest {
     private fun sample(timestampNs: Long, type: String = "accelerometer") =
         SensorSample(timestampNs, type, 1f, 2f, 3f, if (type == "rotation_vector") 0.5f else null, 3)
 
+    @Test fun recordsOptionalCompassAndGameOrientationWithoutChangingTheCsvContract() {
+        val recording = RecordingSession(temporary.root, JSONObject(), availability + mapOf(
+            "magnetometer" to true, "game_rotation_vector" to true), { now }, "optional")
+        now += 1_000_000
+        recording.recordSensor(SensorSample(now, "magnetometer", 12f, 35f, -20f, null, 3))
+        recording.recordSensor(SensorSample(now, "game_rotation_vector", 0f, 0f, 0f, 1f, 3))
+        finish(recording)
+        val rows = File(recording.directory, "sensors.csv").readLines()
+        assertEquals(3, rows.size)
+        assertTrue(rows.any { it.contains(",magnetometer,12.0,35.0,-20.0,,3") })
+        assertTrue(rows.any { it.contains(",game_rotation_vector,0.0,0.0,0.0,1.0,3") })
+        assertEquals(1, metadata(recording).getJSONObject("sensor_counts").getInt("magnetometer"))
+    }
+
+    @Test fun selectsFrameTimeOnlyWhenItsClockAndBoundsAreValid() {
+        for ((index, domain, offset) in listOf(
+            Triple(0, "android_elapsed_realtime_ns", 500_000L),
+            Triple(1, "camera_unknown", 500_000L),
+            Triple(2, "android_elapsed_realtime_ns", -1L),
+            Triple(3, "android_elapsed_realtime_ns", 2_000_000L),
+        )) {
+            val recording = session("timestamp_$index")
+            now += 1_000_000
+            val request = now
+            val ticket = checkNotNull(recording.beginPhoto(request))
+            ticket.temporaryFile.writeBytes(byteArrayOf(1, 2, 3))
+            now += 1_000_000
+            recording.completePhoto(ticket, now, JSONObject()
+                .put("sensor_timestamp_ns", request + offset)
+                .put("sensor_timestamp_clock_domain", domain))
+            finish(recording)
+            val image = events(recording).single { it.getString("type") == "image" }
+            assertEquals(if (index == 0) "camera_frame" else "button_request", image.getString("timestamp_source"))
+            assertEquals(if (index == 0) request + offset else request, image.getLong("timestamp_ns"))
+            assertEquals(request, image.getLong("request_timestamp_ns"))
+        }
+    }
+
     private fun finish(recording: RecordingSession, reason: String = "user") {
         now += 1_000_000
         recording.requestEnd(reason)

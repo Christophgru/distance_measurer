@@ -11,16 +11,25 @@ Android `SensorEvent.timestamp` uses the same clock. UTC is used only for readab
 session IDs and the informational `created_at_utc` field; it cannot be subtracted
 from monotonic timestamps. Never compare monotonic times across phone reboots.
 
-The primary `timestamp_ns` on an image is its **button request time**, also saved
-as `request_timestamp_ns`. `callback_timestamp_ns` is sampled when CameraX's
-file-save callback begins, before EXIF parsing. These bound capture latency but
-are not exposure timestamps. The exposure occurred sometime during asynchronous
-capture; neither endpoint should be used as an exact visual/IMU alignment time.
-This first version deliberately leaves `sensor_timestamp_ns` and its clock domain
-null. Reliable frame timestamp association is future work.
+App 0.2 records the saved JPEG buffer's own `ImageInfo.timestamp` in
+`metadata.sensor_timestamp_ns`. It becomes primary `timestamp_ns` with source
+`camera_frame` only when Camera2 declares a REALTIME clock and the value lies
+between request and callback. Otherwise the primary timestamp remains the
+button request and the original camera timestamp/clock are retained separately.
+Never convert an unknown camera clock by assuming an offset of zero.
+
+The original `request_timestamp_ns` and `callback_timestamp_ns` are always saved.
+Callback time is sampled on entry to the captured-image callback, before JPEG
+storage/EXIF parsing. Each callback owns its JPEG, so association does not depend
+on finding a nearby preview result. Camera frame time does not remove rolling
+shutter, exposure duration or camera processing uncertainty. Physical-device
+verification of timestamp behavior is still required. App 0.1 recordings with
+button-request primary timestamps and null camera timestamps remain valid.
 
 References: [Android SensorEvent timestamp](https://developer.android.com/reference/android/hardware/SensorEvent#timestamp)
-and [CameraX file capture](https://developer.android.com/media/camera/camerax/take-photo).
+and [CameraX captured JPEG callbacks](https://developer.android.com/reference/androidx/camera/core/ImageCapture.OnImageCapturedCallback),
+[image timestamps](https://developer.android.com/reference/androidx/camera/core/ImageInfo#getTimestamp()),
+and [Camera2 timestamp clocks](https://developer.android.com/reference/android/hardware/camera2/CameraCharacteristics#SENSOR_INFO_TIMESTAMP_SOURCE).
 
 ## Session metadata
 
@@ -32,6 +41,8 @@ and [CameraX file capture](https://developer.android.com/media/camera/camerax/ta
   `complete`; lifecycle end produces `interrupted` with an explicit `end_reason`.
 - `sensors`: booleans for `accelerometer`, `gyroscope`, and `rotation_vector`,
   reflecting successful listener registration rather than advertised support alone.
+  App 0.2 also declares optional `magnetometer` and `game_rotation_vector`.
+  Their absence in an older schema-1 recording means they were not recorded.
 - `timeline_start_ns`, and `timeline_end_ns` after successful finalization.
 - `clock_domain`, `image_timestamp_source`, `image_count`, per-type `sensor_counts`,
   and `dropped_sensor_samples`.
@@ -51,9 +62,12 @@ timestamp_ns,sensor_type,x,y,z,w,accuracy
 ```
 
 Accelerometer components include gravity and use m/s². Gyroscope components use
-rad/s. Rotation-vector components are a quaternion in **x, y, z, w** order, with
-Android's device-to-reference orientation convention. `w` is empty for the other
-sensor types. Accuracy is Android's raw sensor accuracy integer.
+rad/s. `magnetometer` components are calibrated Android magnetic-field readings
+in microtesla. Both rotation-vector streams contain quaternions in **x, y, z, w**
+order. The regular vector references east/magnetic-north/up; the game vector has
+an arbitrary drifting heading and excludes compass input. `w` is empty for
+accelerometer, gyro and magnetometer. Accuracy is Android's sensor accuracy
+status integer, not an angular uncertainty estimate.
 
 The axes are Android device axes, not optical camera axes. No gravity removal,
 bias correction, camera/IMU transform, or integration is performed during capture.
@@ -76,10 +90,10 @@ Only successful, readable images produce `image` events:
   "type": "image",
   "index": 0,
   "filename": "images/image_000.jpg",
-  "timestamp_ns": 124100000000,
+  "timestamp_ns": 124200000000,
   "request_timestamp_ns": 124100000000,
   "callback_timestamp_ns": 124500000000,
-  "timestamp_source": "button_request",
+  "timestamp_source": "camera_frame",
   "clock_domain": "android_elapsed_realtime_ns",
   "metadata": {
     "width": 4000,
@@ -97,9 +111,10 @@ Only successful, readable images produce `image` events:
     "focal_length_35mm": null,
     "exposure_time_s": 0.01,
     "iso": 100,
-    "sensor_timestamp_ns": null,
-    "sensor_timestamp_clock_domain": null,
-    "metadata_source": "jpeg_exif_and_camera_characteristics"
+    "sensor_timestamp_ns": 124200000000,
+    "sensor_timestamp_clock_domain": "android_elapsed_realtime_ns",
+    "sensor_timestamp_source": "camerax_image_info",
+    "metadata_source": "jpeg_exif_camera_characteristics_and_image_info"
   }
 }
 ```

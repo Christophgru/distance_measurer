@@ -148,7 +148,7 @@ def _validate_sensors(session: Session, report: ValidationReport, max_gap_s: flo
                 "sensors.csv contains samples at or outside the timeline boundaries",
             )
     for name, stream in session.sensor_streams.items():
-        available = session.metadata.sensors[name]
+        available = session.metadata.sensors.get(name, False)
         timestamps = [sample.timestamp_ns for sample in stream]
         if any(right <= left for left, right in pairwise(timestamps)):
             report.error("sensor_stream_order", f"{name}: timestamps must be strictly increasing")
@@ -189,14 +189,14 @@ def _validate_sensors(session: Session, report: ValidationReport, max_gap_s: flo
                     f"{name}: samples around image {image.index} "
                     f"are more than {max_gap_s:g} s apart",
                 )
-        if name == "rotation_vector":
+        if name in ("rotation_vector", "game_rotation_vector"):
             norms = [
                 math.sqrt(sum(value * value for value in (s.x, s.y, s.z, s.w))) for s in stream
             ]
             if any(abs(norm - 1) > 0.05 for norm in norms):
                 report.warn(
                     "rotation_norm",
-                    "rotation_vector: quaternion norms differ from 1 by more than 0.05",
+                    f"{name}: quaternion norms differ from 1 by more than 0.05",
                 )
 
 
@@ -231,6 +231,14 @@ def _validate_images(session: Session, report: ValidationReport) -> None:
             if session.end_ns is not None and image.callback_timestamp_ns >= session.end_ns:
                 report.error("image_callback_time", f"{label}: callback is at/after timeline end")
         metadata = image.metadata
+        if image.timestamp_source == "camera_frame" and (
+            metadata.sensor_timestamp_ns != image.timestamp_ns
+            or metadata.sensor_timestamp_clock_domain != CLOCK_DOMAIN
+            or image.clock_domain != CLOCK_DOMAIN
+        ):
+            report.error(
+                "image_frame_time", f"{label}: frame timestamp/clock disagrees with metadata"
+            )
         missing = [
             name
             for name in (
@@ -246,7 +254,10 @@ def _validate_images(session: Session, report: ValidationReport) -> None:
         ]
         if missing:
             report.warn("missing_image_metadata", f"{label}: missing {', '.join(missing)}")
-        missing_exposure_times |= metadata.sensor_timestamp_ns is None
+        missing_exposure_times |= (
+            metadata.sensor_timestamp_ns is None
+            or metadata.sensor_timestamp_clock_domain != CLOCK_DOMAIN
+        )
         try:
             path = session.image_path(image)
         except (DatasetFormatError, OSError, RuntimeError) as error:

@@ -8,6 +8,8 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
 SENSOR_TYPES = ("accelerometer", "gyroscope", "rotation_vector")
+OPTIONAL_SENSOR_TYPES = ("game_rotation_vector", "magnetometer")
+ALL_SENSOR_TYPES = SENSOR_TYPES + OPTIONAL_SENSOR_TYPES
 CLOCK_DOMAIN = "android_elapsed_realtime_ns"
 
 
@@ -70,8 +72,10 @@ class SessionMetadata:
             if type(sensors.get(name)) is not bool:
                 raise DatasetFormatError(f"{location}.sensors.{name}: expected a boolean")
         for name in sensors:
-            if name not in SENSOR_TYPES:
+            if name not in ALL_SENSOR_TYPES:
                 raise DatasetFormatError(f"{location}.sensors: unsupported sensor {name!r}")
+            if type(sensors[name]) is not bool:
+                raise DatasetFormatError(f"{location}.sensors.{name}: expected a boolean")
         kwargs = {}
         for name in ("timeline_start_ns", "timeline_end_ns", "image_count"):
             if name in data:
@@ -133,11 +137,11 @@ class SensorSample:
             return _number(value, f"{location}.{name}")
 
         kind = row["sensor_type"]
-        if kind not in SENSOR_TYPES:
+        if kind not in ALL_SENSOR_TYPES:
             raise DatasetFormatError(f"{location}.sensor_type: unsupported sensor {kind!r}")
         w = number("w") if row["w"].strip() else None
-        if (kind == "rotation_vector") != (w is not None):
-            raise DatasetFormatError(f"{location}.w: required only for rotation_vector samples")
+        if (kind in ("rotation_vector", "game_rotation_vector")) != (w is not None):
+            raise DatasetFormatError(f"{location}.w: required only for quaternion sensor samples")
         accuracy = integer("accuracy", -1)
         if accuracy > 3:
             raise DatasetFormatError(
@@ -305,7 +309,9 @@ class Session:
     def sensor_streams(self) -> dict[str, tuple[SensorSample, ...]]:
         return {
             name: tuple(sample for sample in self.sensor_samples if sample.sensor_type == name)
-            for name in SENSOR_TYPES
+            for name in ALL_SENSOR_TYPES
+            if name in self.metadata.sensors
+            or any(s.sensor_type == name for s in self.sensor_samples)
         }
 
     def image_path(self, image: ImageEvent) -> Path:

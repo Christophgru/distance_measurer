@@ -126,6 +126,39 @@ def test_rotation_vector_requires_w(capture):
         load_session(capture.path)
 
 
+def test_optional_heading_streams_load_alongside_legacy_capture(capture):
+    for name in ("magnetometer", "game_rotation_vector"):
+        capture.metadata["sensors"][name] = True
+        capture.metadata["sensor_counts"][name] = 99
+        for row in list(capture.rows):
+            if row["sensor_type"] == "rotation_vector":
+                capture.rows.append(
+                    dict(
+                        row,
+                        sensor_type=name,
+                        x=0,
+                        y=30 if name == "magnetometer" else 0,
+                        z=-40 if name == "magnetometer" else 0,
+                        w="" if name == "magnetometer" else 1,
+                    )
+                )
+    capture.rows.sort(key=lambda r: r["timestamp_ns"])
+    capture.write()
+    session = load_session(capture.path)
+    assert len(session.sensor_streams["magnetometer"]) == 99
+    assert session.sensor_streams["game_rotation_vector"][0].w == 1
+
+
+def test_undeclared_optional_sensor_is_rejected_by_validation(capture):
+    from distance_measuring.dataset import SessionValidationError
+
+    row = next(r for r in capture.rows if r["sensor_type"] == "accelerometer")
+    capture.rows.insert(0, dict(row, sensor_type="magnetometer"))
+    capture.write()
+    with pytest.raises(SessionValidationError, match="declared unavailable"):
+        load_session(capture.path)
+
+
 @pytest.mark.parametrize(
     "content",
     [

@@ -12,6 +12,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.camera2.interop.Camera2CameraInfo
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.ExperimentalImageCaptureOutputFormat
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.Preview
 import androidx.camera.core.resolutionselector.ResolutionSelector
@@ -91,7 +92,7 @@ class MainActivity : ComponentActivity() {
         ) bindCamera() else permissionRequest.launch(Manifest.permission.CAMERA)
     }
 
-    @androidx.annotation.OptIn(ExperimentalCamera2Interop::class)
+    @androidx.annotation.OptIn(ExperimentalCamera2Interop::class, ExperimentalImageCaptureOutputFormat::class)
     private fun bindCamera() {
         if (bindingCamera || imageCapture != null) return
         bindingCamera = true
@@ -108,6 +109,7 @@ class MainActivity : ComponentActivity() {
                     it.surfaceProvider = preview.surfaceProvider
                 }
                 val photos = ImageCapture.Builder()
+                    .setOutputFormat(ImageCapture.OUTPUT_FORMAT_JPEG)
                     .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
                     .setJpegQuality(100)
                     .setResolutionSelector(ResolutionSelector.Builder()
@@ -123,6 +125,10 @@ class MainActivity : ComponentActivity() {
                         info.getCameraCharacteristic(CameraCharacteristics.SENSOR_ORIENTATION))
                     .put("sensor_width_mm", sensorSize?.width ?: JSONObject.NULL)
                     .put("sensor_height_mm", sensorSize?.height ?: JSONObject.NULL)
+                    .put("sensor_timestamp_clock_domain",
+                        if (info.getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE) ==
+                            CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME)
+                            "android_elapsed_realtime_ns" else "camera_unknown")
                 imageCapture = photos
                 render()
             } catch (error: Exception) {
