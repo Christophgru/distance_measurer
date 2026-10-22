@@ -1,5 +1,9 @@
 # M9 stopped at the ruler accuracy gate
 
+This records the original failed M7-based check. A later
+[pairwise/acceleration retry](ruler_pairwise_acceleration_retry.md) passes the
+ruler-reference geometry checks; independent inertial metric scale still fails.
+
 M9 is **incomplete**. The added T9.1 requirement says to check the ruler's
 centimetre scale and stop if deviation exceeds 10%. The measurement01 check
 failed, so no measurement engine, metric scene scale or measurement CLI was

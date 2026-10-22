@@ -657,9 +657,11 @@ The user can unambiguously specify point A and point B.
 ## T9.1 Point-to-point distance
  as reference use the image, it is a ruler and has scales on it in cm. verifiy it fits, if it deviates more tha  10% stop
 
-**Status: stopped at the accuracy gate.** The ruler check exceeds 10% deviation
-and its triangulated ticks fail the reprojection threshold. See the
-[M9 validation record](docs/experiments/m9_ruler_validation.md). M9 remains incomplete.
+**Status: measurement engine still incomplete.** The
+[original ruler check](docs/experiments/m9_ruler_validation.md) failed. The
+[pairwise/acceleration retry](docs/experiments/ruler_pairwise_acceleration_retry.md)
+passes ruler-reference geometry checks (worst pairwise interval error 1.66%),
+but acceleration-derived metric scale still fails the 10% limit and is not accepted.
 
 [ ] Implement:
 

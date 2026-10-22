@@ -151,6 +151,26 @@ reconstructed continuous IMU trajectory. Positions use **arbitrary reconstructio
 units**, and physical accuracy remains unverified. These diagnostics do not
 change the failed M9 accuracy gate or apply a metric scale.
 
+## Retry ruler geometry and acceleration scale
+
+```bash
+.venv/bin/python tools/validation/retry_ruler.py
+```
+
+This reads the pairwise matching audit, rebuilds poses using the strongest pair
+and PnP overlap, refines the scene, and repeats the unchanged held-out ruler check.
+It separately tries acceleration-derived scale with gravity and timing sensitivity
+tests. Outputs are in `data/processed/measurement01/ruler_retry/`:
+`scene.json`, `ruler_retry.json`, `ruler_comparison.png`,
+`acceleration_diagnostics.png` and the intermediate pairwise/scene/IMU artifacts.
+Existing inputs stay unchanged. A completed experiment does not imply accepted
+metric scale; inspect the report's quality flags.
+
+The ruler-reference geometry now passes. Independent acceleration scale remains
+unreliable and is not applied to the exported scene. See
+[retry results](../../docs/experiments/ruler_pairwise_acceleration_retry.md) and
+[inertial equations](../../docs/math/inertial_ruler_retry.md).
+
 The separate ruler gate can still be reproduced with
 `tools/validation/measurement01_ruler.py`; see the
 [M9 validation record](../../docs/experiments/m9_ruler_validation.md).
