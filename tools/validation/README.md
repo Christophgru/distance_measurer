@@ -1,0 +1,81 @@
+# Visual diagnostics for measurement01
+
+Generate the red/blue image overlaps and Matplotlib phone-motion plot:
+
+```bash
+.venv/bin/python tools/validation/visualize_capture.py
+```
+
+The tool reads the existing raw recording and M4/M5/M7 results. It writes to
+`data/processed/measurement01/visual_diagnostics/` by default:
+
+- `overlays_overview.png`: all three image pairs, with original overlaps,
+  M4 image-match rectification and M7 pose-based rectification in separate columns.
+- `pair_000_001_raw.png`, `pair_000_001_m4_matches.png`,
+  `pair_000_001_m7_poses.png`, and equivalents for pairs 1–2 and 0–2:
+  individual full-resolution working-image overlays without guide lines.
+- `phone_estimated_motion.png` and `.svg`: 3D path with camera axes, XY/XZ
+  projections with viewing arrows, XYZ coordinates over capture time, and
+  rotation angle relative to the first photo. The gray dashed path is the
+  M5 initial chain; the solid path is the M7 bundle-adjusted estimate.
+- `diagnostics.json`: source hashes, display rotation, homographies, camera
+  coordinates/orientations, elapsed times and inherited scale/quality status.
+
+To zoom/pan the plots interactively on a desktop with a Matplotlib GUI backend:
+
+```bash
+.venv/bin/python tools/validation/visualize_capture.py --show
+```
+
+The default display rotates 90° clockwise for this recording's EXIF orientation.
+All geometry is computed first in the original stored-orientation working
+pixels. `--stored-orientation` disables only this final display rotation.
+`--session`, `--matches`, `--scene`, `--poses` and `--output` can override paths;
+the inputs must describe the same three-photo recording and intrinsic matrices.
+Output destinations under the raw or source artifact directories are rejected.
+
+## Reading the overlays
+
+The first image in each pair is **red**, the second **blue**. Original colors
+are converted to grayscale before coloring, so object colors do not confuse
+the comparison. Coincident equal intensities appear **magenta**. Magenta alone
+does not prove a correct correspondence.
+
+Original overlaps expose the overall apparent motion. A single whole-image
+alignment cannot register a general 3D scene at different depths. Rectification
+preserves depth disparity: separation **along** the stated scanline direction
+can be normal; compare the **same physical feature across** scanlines to inspect
+geometric inconsistency. Occlusion and exposure differences can also change
+the appearance. Green guides occur only in the overview, not the saved overlays.
+
+M4 rectification is estimated from image matches independently of the M7 poses.
+M7 rectification uses only the saved K/R/C values, without fitting new
+correspondences. A common viewport adjustment keeps both warped images visible
+and preserves epipolar alignment. Rays near/behind the virtual image horizon
+and extreme 2% image-support tails do not set the viewport; some border content
+may be clipped. Black regions represent absent warped image coverage.
+
+## Geometry and verification
+
+Code comments retain lecture 002 slide/page references, in one-based PPTX order:
+**pp. 81–83** for `M=K[R|-RC]`, world/camera transforms and relative pose;
+**pp. 70–76, 133–134** for pixel rays and a virtual camera;
+**pp. 138–140** for rectification and epipolar scanlines; **pp. 36–39** for
+rotation. OpenCV rectification, viewport sampling, color channels and the
+trace-to-rotation-angle diagnostic are implementation choices/extensions.
+
+Synthetic checks cover both horizontal and vertical stereo with rotated,
+translated cameras, verifying exact common scanlines after rectification.
+Additional checks verify red/blue channel identity, equal-intensity magenta,
+invalid image inputs, and rejection of coincident camera centers. The real
+recording's generated plots were visually inspected, and source hashes are
+checked unchanged after rendering. Image data and plots remain ignored locally.
+
+The motion connects three photo poses at their capture times. It is not a
+reconstructed continuous IMU trajectory. Positions use **arbitrary reconstruction
+units**, and physical accuracy remains unverified. These diagnostics do not
+change the failed M9 accuracy gate or apply a metric scale.
+
+The separate ruler gate can still be reproduced with
+`tools/validation/measurement01_ruler.py`; see the
+[M9 validation record](../../docs/experiments/m9_ruler_validation.md).

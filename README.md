@@ -110,6 +110,11 @@ exceeds 10% deviation and fails triangulation quality checks. See the
 [reproducible ruler diagnostic](docs/experiments/m9_ruler_validation.md).
 The measurement engine remains pending.
 
+Generate red/blue image overlaps and a Matplotlib plot of the estimated phone
+motion with `python tools/validation/visualize_capture.py`. See the
+[visual diagnostics guide](tools/validation/README.md) for full-size outputs,
+interactive zoom/pan and how to interpret the overlays.
+
 ---
 
 ## Why this project exists
