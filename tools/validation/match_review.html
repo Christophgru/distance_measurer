@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pairwise correspondence review</title>
+<style>
+body{font:16px system-ui,sans-serif;background:#151b24;color:#edf2f7;margin:24px}
+h1{font-size:24px;margin-bottom:8px}p{color:#bdcad9;max-width:1100px;line-height:1.5}
+nav{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:20px 0}
+button,select{font:inherit;padding:9px 14px;border:1px solid #61738b;border-radius:6px;background:#263448;color:inherit;cursor:pointer}
+button:disabled{opacity:.4;cursor:default}.good{background:#164e39}.bad{background:#672d37}
+#status{font-variant-numeric:tabular-nums}.views{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+canvas{display:block;width:100%;height:auto;background:#080b10;border:1px solid #46546a;box-sizing:border-box}
+h2{font-size:17px;margin:12px 0} .context{max-height:48vh;object-fit:contain}
+#note{min-height:28px;color:#ffd480}.count{font-size:14px;color:#bdcad9}
+@media(max-width:700px){.views{grid-template-columns:1fr}.context{max-height:45vh}}
+</style>
+<h1>Check corresponding points in overlapping photos</h1>
+<p>Yellow marks show one correspondence, without camera-pose warps. Inspect the crops and full-image
+context together. Two photos are enough; a three-view cycle is an optional extra check.
+Geometry and correlation can still accept a repeated pattern.
+Review decisions stay in this browser; use Download review to save them.</p>
+<nav>
+ <select id="mode" aria-label="Image pair"></select>
+ <label><input id="verified" type="checkbox" checked> Correlation + geometry passed</label>
+ <button id="prev">← Previous</button><select id="pick" aria-label="Correspondence"></select><button id="next">Next →</button>
+ <button id="good" class="good">Same point [G]</button><button id="bad" class="bad">Wrong / uncertain [B]</button>
+ <button id="clear">Unreviewed [U]</button><button id="save">Download review</button>
+ <label>Crop width <input id="zoom" type="range" min="24" max="240" value="88" aria-label="Crop width"></label>
+</nav>
+<div id="status"></div><p id="note"></p>
+<div class="views" id="views"></div>
+<script>
+const data=__AUDIT_DATA__;
+const $=id=>document.getElementById(id);
+const key='correspondence-review-'+data.review_id;
+let decisions={};try{decisions=JSON.parse(localStorage.getItem(key)||'{}')}catch(e){}
+let current=0;const photos=[];
+$('views').style.gridTemplateColumns=`repeat(${data.images.length},minmax(0,1fr))`;
+for(const name of [...new Set(data.tracks.map(t=>t.dataset_id))]){const o=document.createElement('option');o.value=name;o.textContent=name;$('mode').appendChild(o)}
+function selected(){return data.tracks.filter(t=>t.dataset_id===$('mode').value&&(!$('verified').checked||(t.support_count===2?t.usable_pairwise:t.pairwise_epipolar_consistent)))}
+for(let i=0;i<data.images.length;i++){
+ const panel=document.createElement('section');
+ panel.innerHTML=`<h2>Image ${data.image_ids[i]} · point crop</h2><canvas id="crop${i}" width="640" height="360"></canvas><h2>Full-image context</h2><canvas class="context" id="full${i}"></canvas>`;
+ $('views').appendChild(panel);
+}
+function cross(ctx,x,y,r){ctx.strokeStyle='#000';ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(x-r,y);ctx.lineTo(x+r,y);ctx.moveTo(x,y-r);ctx.lineTo(x,y+r);ctx.stroke();ctx.strokeStyle='#ffe66b';ctx.lineWidth=2;ctx.stroke()}
+function render(){
+ const entries=selected();const track=entries[current];
+ if(!track){$('status').textContent='No matches pass this filter. Uncheck the filter to inspect candidates.';$('pick').replaceChildren();$('note').textContent='';photos.forEach((_,i)=>{for(const type of ['full','crop']){const c=$(type+i);c.getContext('2d').clearRect(0,0,c.width,c.height)}});return}
+ $('pick').replaceChildren(...entries.map(t=>{const o=document.createElement('option');o.value=t.match_id;o.textContent=`#${t.match_id} · ${decisions[t.match_id]||'unreviewed'}`;return o}));$('pick').value=track.match_id;
+ const values=Object.values(decisions);
+ $('status').textContent=`Match #${track.match_id} · ${current+1}/${entries.length} · ${decisions[track.match_id]||'unreviewed'} | Same point: ${values.filter(x=>x==='same_point').length}, wrong/uncertain: ${values.filter(x=>x==='wrong_or_uncertain').length}`;
+ $('note').textContent=track.support_count===2?`Two-view match; geometry ${track.pairwise_epipolar_consistent?'passed':'FAILED'}. Patch correlation: ${track.correlation.score==null?track.correlation.reason:track.correlation.score.toFixed(3)+' ('+(track.correlation.reason||'passed')+')'}. No third view required.`:(track.pairwise_epipolar_consistent?'Optional closed three-view cycle; all pairwise geometry checks passed.':'Optional cycle, but at least one pairwise geometry check FAILED.');
+ $('prev').disabled=current===0;$('next').disabled=current===entries.length-1;
+ photos.forEach((photo,i)=>{
+  const full=$('full'+i);full.width=photo.width;full.height=photo.height;
+  const ctx=full.getContext('2d');ctx.drawImage(photo,0,0);
+  if(!track.display_pixels[i]){const c=$('crop'+i),p=c.getContext('2d');p.clearRect(0,0,c.width,c.height);p.fillStyle='#bdcad9';p.font='24px system-ui';p.fillText('Not required for this pair',30,180);return}
+  const [x,y]=track.display_pixels[i];ctx.strokeStyle='#ffe66b';ctx.lineWidth=3;ctx.beginPath();ctx.arc(x,y,17,0,2*Math.PI);ctx.stroke();cross(ctx,x,y,12);
+  const crop=$('crop'+i),patch=crop.getContext('2d');const w=Number($('zoom').value),h=w*crop.height/crop.width;
+  patch.fillStyle='#080b10';patch.fillRect(0,0,crop.width,crop.height);patch.drawImage(photo,x-w/2,y-h/2,w,h,0,0,crop.width,crop.height);cross(patch,crop.width/2,crop.height/2,13);
+ });
+}
+function mark(value){const track=selected()[current];if(!track)return;const id=track.match_id;if(value)decisions[id]=value;else delete decisions[id];try{localStorage.setItem(key,JSON.stringify(decisions))}catch(e){}render()}
+$('pick').onchange=()=>{current=selected().findIndex(t=>String(t.match_id)===$('pick').value);render()};
+$('mode').onchange=$('verified').onchange=()=>{current=0;render()};
+$('prev').onclick=()=>{current=Math.max(0,current-1);render()};$('next').onclick=()=>{current=Math.min(selected().length-1,current+1);render()};
+$('good').onclick=()=>mark('same_point');$('bad').onclick=()=>mark('wrong_or_uncertain');$('clear').onclick=()=>mark(null);$('zoom').oninput=render;
+document.onkeydown=e=>{if(e.target.tagName==='SELECT'||e.target.tagName==='INPUT')return;if(e.key==='ArrowLeft')$('prev').click();if(e.key==='ArrowRight')$('next').click();if(e.key.toLowerCase()==='g')mark('same_point');if(e.key.toLowerCase()==='b')mark('wrong_or_uncertain');if(e.key.toLowerCase()==='u')mark(null)};
+$('save').onclick=()=>{const report={schema_version:1,review_id:data.review_id,session_id:data.session_id,source_sha256:data.source_sha256,decisions};const url=URL.createObjectURL(new Blob([JSON.stringify(report,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='correspondence_review.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)};
+Promise.all(data.images.map(src=>new Promise((resolve,reject)=>{const im=new Image();im.onload=()=>resolve(im);im.onerror=reject;im.src=src}))).then(imgs=>{photos.push(...imgs);render()}).catch(()=>{$('note').textContent='Could not decode the embedded review images.'});
+</script>
+</html>

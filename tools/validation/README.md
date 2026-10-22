@@ -1,4 +1,79 @@
-# Visual diagnostics for measurement01
+# Capture geometry and matching diagnostics
+
+## Check point matches before changing camera poses
+
+Two overlapping photos are enough. Run the pairwise matcher and normalized
+patch-correlation checks on recorded images 0 and 1:
+
+```bash
+.venv/bin/python tools/validation/audit_correspondences.py data/raw/measurement01 \
+    --image-indices 0 1 \
+    --regions tools/validation/measurement01_matching_regions.json \
+    --output data/processed/measurement01/pairwise_matching
+```
+
+Select three images to check all three pairs independently, with optional
+three-view cycles as a bonus:
+
+```bash
+.venv/bin/python tools/validation/audit_correspondences.py data/raw/measurement01 \
+    --image-indices 0 1 2 \
+    --regions tools/validation/measurement01_matching_regions.json \
+    --output data/processed/measurement01/matching_review
+```
+
+The region file is a **manual desk/laptop/ruler search mask** for this recording.
+It excludes the monitor-dominated upper areas. It contains no point
+correspondences and supplies no calibration. Omit `--regions` to search entire
+images. Defaults use a 1600-pixel longest edge, affine-SIFT through tilt index 3,
+RootSIFT normalization and ratio 0.75 in both directions. `--max-tilt 0` uses
+ordinary SIFT without affine simulation. Extraction and exact descriptor matching
+can take several minutes on these photos.
+
+Open the generated **`review.html`** directly in a browser. Choose an image pair,
+inspect the same marked point in unwarped context and zoomed crops, then optionally
+mark **Same point [G]** or **Wrong / uncertain [B]**. Arrow keys navigate; **U**
+clears a decision. The default filter shows spatially distinct candidates that
+pass both epipolar geometry and patch correlation. Uncheck it to inspect rejected,
+unverified or duplicate candidates. An unused third image is explicitly marked
+as unnecessary. Three-view cycles have their own optional selector.
+
+The page works offline with embedded photos and makes no network requests.
+Decisions are stored in the browser when local storage is available. **Download
+review** exports decisions bound to the report's review ID and source hashes.
+Export does not automatically change any reconstruction or camera poses.
+
+Other outputs are:
+
+- `correspondences.json`: full pairwise candidates, correlation scores/reasons,
+  proposed refined locations, duplicate links, optional cycles and source hashes.
+- `pair_*.npz`: aligned group IDs, forward/reverse ratios, F inliers, correlation
+  acceptance and the final `usable_pairwise` mask. These are the new audit's
+  group IDs, not M4/M7 feature or point IDs.
+- `image_*_features.npz`: grouped image locations and their affine-view descriptors.
+- `match_cards_*.jpg`: up to 20 passing pairwise matches per pair plus up to 30
+  optional cycle tracks. These are previews; HTML/JSON retain every candidate.
+- `tracks_overview.jpg`: optional cycle locations, or up to 40 passing pairwise
+  matches when only two images are selected.
+
+`--reuse-features PREVIOUS_AUDIT_DIRECTORY` can reuse extracted descriptors after
+checking source hashes, working intrinsics and extraction settings. It recomputes
+pair matching and correlation. Use a separate output directory. Source capture,
+feature-cache and calibration files remain unchanged. Raw/session output paths
+and overwriting a selected cache directory are rejected.
+
+Patch correlation follows lecture 002 **pp. 141–144**, with explicit rejection
+of flat texture and ambiguous peaks. Oblique patches use a local homography
+estimated from neighboring matches in **that pair only**, with the query held
+out of its own fit. A two-patch API also works directly without any neighboring
+matches or camera geometry. See [the equations and API](../../docs/math/correspondence_consistency.md)
+and [measurement01 results](../../docs/experiments/measurement01_matching_review.md).
+
+These checks improve inspectability and reject common inconsistencies; passing
+them does not prove physical identity, correct camera alignment or metric scale.
+Existing M4–M9 artifacts and the M9 accuracy gate are preserved.
+
+## Red/blue overlays and motion plots
 
 Generate the red/blue image overlaps and Matplotlib phone-motion plot:
 

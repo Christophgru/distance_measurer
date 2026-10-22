@@ -115,6 +115,13 @@ motion with `python tools/validation/visualize_capture.py`. See the
 [visual diagnostics guide](tools/validation/README.md) for full-size outputs,
 interactive zoom/pan and how to interpret the overlays.
 
+Before changing camera alignment, check matches directly with
+`tools/validation/audit_correspondences.py`. It supports **two overlapping images**,
+bidirectional descriptor checks, normalized patch correlation and an offline
+point-by-point review page. Three-view cycles are optional. See the
+[matching review guide](tools/validation/README.md) and
+[measurement01 matching results](docs/experiments/measurement01_matching_review.md).
+
 ---
 
 ## Why this project exists

@@ -1,0 +1,9 @@
+{
+  "coordinate_frame": "normalized_stored_pixels_ignore_exif",
+  "description": "Manually selected desk/laptop/ruler search regions. Excludes the upper monitor-dominated image area; these polygons are NOT point correspondences or camera calibration.",
+  "images": {
+    "0": [[0.3125, 0], [1, 0], [1, 1], [0.3125, 1]],
+    "1": [[0.3125, 0], [1, 0], [1, 1], [0.3125, 1]],
+    "2": [[0.21875, 0], [1, 0], [1, 1], [0.21875, 1]]
+  }
+}
