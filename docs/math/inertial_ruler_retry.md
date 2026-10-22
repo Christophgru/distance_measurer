@@ -117,3 +117,28 @@ A positive fixed-bias solution is therefore a diagnostic candidate. Only after
 fitting it are reconstructed ruler lengths compared with centimetre markings.
 Neither the reference interval nor held-out ruler lengths influence that scale
 fit. The retry does not attach this unvalidated scale to the scene.
+
+## Diagnose a small scale before changing units
+
+For exactly three positions, divide the two displacement equations by `t1,t2`
+and subtract to remove initial velocity. Writing the resulting vectors as
+`q_visual` and `q_imu` gives `s=dot(q_visual,q_imu)/norm(q_visual)^2`. Thus a
+nearly perpendicular inertial vector produces a small fitted scale even when
+its magnitude is reasonable. This is the same least-squares solution as the
+joint scale/velocity fit, not a new scale estimator.
+
+A constant world acceleration error `b` satisfies
+`q_imu = s*q_visual + (t2-t1)*b/2`. For any assumed scale, choose
+`b=2*(q_imu-s*q_visual)/(t2-t1)` and recover an initial velocity that fits all
+three positions. The exported error family demonstrates non-uniqueness; a
+ruler-reference member must never be presented as independent bias calibration.
+
+The diagnostic also compares the fused rotation vector with gyro integration.
+For device-frame angular velocity, orientation increments multiply on the
+right: `R_wd_next = R_wd * Exp(omega_device*dt)`. Midpoint integration starts
+from one measured rotation-vector orientation and assumes zero gyro bias.
+Its world frame initially shares ENU; subsequent drift is not corrected. An
+unsupported fused heading jump and an inaccurate gravity direction are distinct
+effects: a pure world-yaw correction does not itself tilt gravity.
+
+See [the quantified measurement01 experiment](../experiments/measurement01_scale_discrepancy.md).

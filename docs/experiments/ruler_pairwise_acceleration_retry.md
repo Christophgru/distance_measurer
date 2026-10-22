@@ -5,6 +5,13 @@ An independent acceleration-derived metric scale still fails. This is a
 follow-up to the [original M9 failure](m9_ruler_validation.md), not completion of
 the M9 measurement engine or the IMU milestones.
 
+A [subsequent scale diagnosis](measurement01_scale_discrepancy.md) finds fused
+orientation jumps unsupported by the gyro. Keeping these matches/poses fixed
+and using gyro-integrated orientation brings the nominal button-time estimate
+to approximately 4.95 cm for a 5 cm interval. Bias/timing sensitivity still
+prevents acceptance of metric scale; the results below retain the original
+rotation-vector experiment for comparison.
+
 ## Reproduce
 
 From the repository root with the recorded session and matching-review artifacts:

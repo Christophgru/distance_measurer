@@ -20,6 +20,7 @@ from distance_measuring.dataset import load_session
 from distance_measuring.inertial.experimental import (
     back_camera_from_device,
     fit_visual_scale,
+    gyro_orientation_interpolator,
     integrate_interval,
     orientation_interpolator,
 )
@@ -78,7 +79,7 @@ def checks(scene):
     return [ruler_check(scene, ids) for ids in [*combinations(range(3), 2), (0, 1, 2)]]
 
 
-def imu_experiment(session, scene, seed_measurement):
+def imu_experiment(session, scene, seed_measurement, *, orientation_source="rotation_vector"):
     streams = session.sensor_streams
     base = session.start_ns
     rotation = streams["rotation_vector"]
@@ -88,13 +89,26 @@ def imu_experiment(session, scene, seed_measurement):
         raise ValueError("Retry needs accelerometer, rotation-vector and gyroscope streams")
     rt = np.array([(s.timestamp_ns - base) / 1e9 for s in rotation])
     sl = orientation_interpolator(rt, [[s.x, s.y, s.z, s.w] for s in rotation])
+    gt = np.array([(s.timestamp_ns - base) / 1e9 for s in gyro])
+    gw = np.array([[s.x, s.y, s.z] for s in gyro])
+    seed_time = None
+    if orientation_source == "gyroscope":
+        covered = (gt >= rt[0]) & (gt <= rt[-1])
+        if covered.sum() < 2:
+            raise ValueError("Need gyro samples inside rotation-vector coverage")
+        seed_time = float(gt[covered][0])
+        sl = gyro_orientation_interpolator(gt[covered], gw[covered], sl(seed_time))
+        rt = gt[covered]
+    elif orientation_source != "rotation_vector":
+        raise ValueError("Unknown orientation source")
     at = np.array([(s.timestamp_ns - base) / 1e9 for s in acceleration])
     raw = np.array([[s.x, s.y, s.z] for s in acceleration])
     inside = (at >= rt[0]) & (at <= rt[-1])
     at = at[inside]
     raw = raw[inside]
     # Lecture 002 pp. 38–45/81: change reference frame BEFORE removing gravity.
-    # Android rotation vectors map device coordinates into the ENU world frame.
+    # Android rotation vectors map device coordinates into the ENU world frame;
+    # the gyro trial seeds that frame once and then propagates it without correction.
     world = sl(at).apply(raw)
     early = at < 0.7
     if early.sum() < 10:
@@ -115,8 +129,6 @@ def imu_experiment(session, scene, seed_measurement):
     R_cd = back_camera_from_device(images[0].metadata.sensor_orientation_degrees)
     cameras = {c.image_id: c for c in scene.cameras}
     centers = np.array([cameras[i].extrinsics.C_w for i in range(3)])
-    gt = np.array([(s.timestamp_ns - base) / 1e9 for s in gyro])
-    gw = np.array([[s.x, s.y, s.z] for s in gyro])
     trials = []
     rotation_checks = []
     endpoint_checks = []
@@ -219,6 +231,9 @@ def imu_experiment(session, scene, seed_measurement):
             )
     return (
         {
+            "orientation_source": orientation_source,
+            "gyro_seed_time_s": seed_time,
+            "gyro_bias_assumed_rad_s": [0, 0, 0] if orientation_source == "gyroscope" else None,
             "camera_from_device_nominal": R_cd.tolist(),
             "camera_imu_mounting_calibrated": False,
             "camera_imu_lever_arm_assumed_m": [0, 0, 0],
@@ -240,7 +255,12 @@ def imu_experiment(session, scene, seed_measurement):
                 "Photo times are button requests, not measured exposure times",
                 "Accelerometer bias, initial velocity and camera/IMU lever arm are not calibrated",
                 "Three poses cannot jointly determine scale, initial velocity and constant bias",
-            ],
+            ]
+            + (
+                ["Gyro orientation assumes zero bias and has no drift correction"]
+                if orientation_source == "gyroscope"
+                else []
+            ),
         },
         at,
         world,

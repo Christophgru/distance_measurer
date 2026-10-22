@@ -662,6 +662,10 @@ The user can unambiguously specify point A and point B.
 [pairwise/acceleration retry](docs/experiments/ruler_pairwise_acceleration_retry.md)
 passes ruler-reference geometry checks (worst pairwise interval error 1.66%),
 but acceleration-derived metric scale still fails the 10% limit and is not accepted.
+The [scale diagnosis](docs/experiments/measurement01_scale_discrepancy.md) identifies
+orientation jumps unsupported by the gyro. A gyro-orientation trial reaches
+approximately 4.95 cm for 5 cm, but timing/bias sensitivity still exceeds the
+limit; metric scale remains unaccepted.
 
 [ ] Implement:
 

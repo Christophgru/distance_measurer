@@ -41,6 +41,32 @@ def orientation_interpolator(times, quaternions):
     return Slerp(times, Rotation.from_quat(quaternions))
 
 
+def gyro_orientation_interpolator(times, angular_velocity, initial_orientation):
+    """Integrate device-frame gyro rad/s, seeded by one device-to-world rotation.
+
+    Midpoint increments compose on the right because the gyro axes move with the
+    device. Bias is assumed zero; this is a short-recording sensitivity trial.
+    """
+    times, angular_velocity = np.asarray(times, float), np.asarray(angular_velocity, float)
+    if (
+        times.ndim != 1
+        or len(times) < 2
+        or angular_velocity.shape != (len(times), 3)
+        or not np.isfinite(times).all()
+        or not np.isfinite(angular_velocity).all()
+        or np.any(np.diff(times) <= 0)
+        or initial_orientation.as_matrix().shape != (3, 3)
+    ):
+        raise ValueError("Need increasing gyro times, finite Nx3 rates and one initial rotation")
+    orientations = [initial_orientation]
+    for i, dt in enumerate(np.diff(times)):
+        increment = Rotation.from_rotvec(0.5 * (angular_velocity[i] + angular_velocity[i + 1]) * dt)
+        # Lecture 002 pp. 38–45: compose rotations of changing reference frames.
+        # Gyro integration itself is additional inertial material.
+        orientations.append(orientations[-1] * increment)
+    return Slerp(times, Rotation.concatenate(orientations))
+
+
 def integrate_interval(times, acceleration, start, end):
     """Exact integration of a piecewise-linear acceleration; initial velocity zero.
 
@@ -122,4 +148,57 @@ def fit_visual_scale(centers, elapsed, integrated_displacements):
         )
         if positive
         else ("nonpositive_scale" if rank == 4 else "unobservable_scale"),
+    }
+
+
+def three_pose_scale_diagnostics(centers, elapsed, integrated_displacements, reference_scale):
+    """Explain a three-pose scale fit; reference scale is a comparison input only.
+
+    Eliminate initial velocity by dividing each position equation by its elapsed
+    time and subtracting. A constant WORLD acceleration error can then explain
+    any chosen scale. This is a sensitivity calculation, not bias calibration.
+    See docs/math/inertial_ruler_retry.md; kinematics extends the camera lecture.
+    """
+    centers, elapsed, displacement = [
+        np.asarray(x, float) for x in (centers, elapsed, integrated_displacements)
+    ]
+    fit = fit_visual_scale(centers, elapsed, displacement)  # shared input validation
+    if len(centers) != 3 or not np.isfinite(reference_scale) or reference_scale <= 0:
+        raise ValueError("Need exactly three poses and a finite positive reference scale")
+    dt = elapsed[1:]
+    delta = centers[1:] - centers[0]
+    visual = delta[1] / dt[1] - delta[0] / dt[0]
+    inertial = displacement[1] / dt[1] - displacement[0] / dt[0]
+    nv, ni = np.linalg.norm(visual), np.linalg.norm(inertial)
+    observable = fit["fixed_bias_design_rank"] == 4
+    # Lecture 002 p. 36: Euclidean norm/dot product in one orthonormal frame.
+    # The remaining velocity-eliminated equation is s*visual=inertial.
+    cosine = float(np.clip(visual @ inertial / (nv * ni), -1, 1)) if nv * ni > 0 else None
+    family = []
+    for scale in [0.0, fit["raw_scale_solution_m_per_unit"], float(reference_scale)]:
+        bias = 2 * (inertial - scale * visual) / (dt[1] - dt[0])
+        corrected = displacement - 0.5 * dt[:, None] ** 2 * bias
+        velocity = (scale * delta[0] - corrected[0]) / dt[0]
+        residual = scale * delta - dt[:, None] * velocity - corrected
+        family.append(
+            {
+                "assumed_scale_m_per_unit": scale,
+                "world_acceleration_error_to_subtract_m_s2": bias.tolist(),
+                "acceleration_error_norm_m_s2": float(np.linalg.norm(bias)),
+                "initial_velocity_world_m_s": velocity.tolist(),
+                "position_residual_rms_m": float(np.sqrt(np.mean(residual**2))),
+            }
+        )
+    return {
+        "visual_velocity_difference_units_s": visual.tolist(),
+        "inertial_velocity_difference_m_s": inertial.tolist(),
+        "direction_difference_degrees": None
+        if cosine is None or not observable
+        else float(np.degrees(np.arccos(cosine))),
+        "magnitude_ratio_m_per_unit": float(ni / nv) if observable else None,
+        "projection_scale_m_per_unit": float(visual @ inertial / (nv * nv)) if observable else None,
+        "reference_scale_m_per_unit_comparison_only": float(reference_scale),
+        "constant_world_error_family": family,
+        "bias_calibrated": False,
+        "metric_scale_accepted": False,
     }

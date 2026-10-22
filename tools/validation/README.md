@@ -1,5 +1,21 @@
 # Capture geometry and matching diagnostics
 
+## Explain the ruler/acceleration size difference
+
+After the pairwise ruler retry, run:
+
+```bash
+.venv/bin/python tools/validation/explain_scale_discrepancy.py
+```
+
+Open `data/processed/measurement01/scale_discrepancy/scale_discrepancy.png` and
+the companion JSON. The experiment compares fused and gyro-integrated
+orientation, checks heading jumps against gyro increments, decomposes the scale
+fit into magnitude and direction, and quantifies timing/bias sensitivity.
+It reproduces the original retry scales and checks input hashes before writing
+to a separate directory. No metric scale is applied. See
+[the numerical findings](../../docs/experiments/measurement01_scale_discrepancy.md).
+
 ## Check point matches before changing camera poses
 
 Two overlapping photos are enough. Run the pairwise matcher and normalized
