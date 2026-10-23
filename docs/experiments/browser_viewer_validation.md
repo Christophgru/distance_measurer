@@ -1,5 +1,11 @@
 # GPU reconstruction inspection
 
+**Density update:** the [20k stereo-sampling pass](dense_20k_validation.md) now
+adds 19,059 image-supported samples while preserving all original cameras and
+points. The main HTML has 20,000 points; the initial 941-point export is retained
+as `interactive_scene/sparse_941.html`. The record below describes the original
+browser-viewer milestone.
+
 The latest usable visual reconstruction is exported as a single offline file:
 
 `data/processed/2026-10-23_091847_034_be3e7ada/interactive_scene/index.html`

@@ -623,7 +623,9 @@ and `docs/architecture/scene_viewer.md`. Scale and quality warnings remain expli
 The [GPU browser viewer](docs/architecture/scene_viewer.md) additionally exports
 an offline interactive HTML artifact with orbit/pan/zoom, camera views, photo
 planes, GPU point picking, observation rays and quality filters. The latest
-export contains 941 points and cameras 2, 3, 7; geometry and scale are unchanged.
+export now contains 20,000 points (941 sparse + 19,059 stereo samples) and
+cameras 2, 3, 7. All original points/camera parameters and metric-scale status
+are unchanged. Added samples are inspection data with separate provenance.
 
 ## T8.1 Open3D viewer
 

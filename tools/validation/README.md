@@ -262,6 +262,28 @@ not drop individual marks to improve a length. A held-out error over 10% rejects
 the check and exits 1. No scene or acceleration fit is changed. See the
 [new capture's subset results](../../docs/experiments/measurement_20261023_091847_subset.md).
 
+## Add image-supported samples for browser inspection
+
+```bash
+.venv/bin/python tools/validation/densify_scene.py \
+  data/raw/2026-10-23_091847_034_be3e7ada \
+  --scene data/processed/2026-10-23_091847_034_be3e7ada/visual_cameras_usable/scene.json \
+  --regions tools/validation/measurement_20261023_091847_regions.json \
+  --target-points 20000 \
+  --output data/processed/2026-10-23_091847_034_be3e7ada/dense_20k
+```
+
+Then export `dense_20k/scene.json` with `python/scripts/export_scene_web.py`.
+The source scene and camera parameters are immutable. The new scene appends
+stereo-triangulated points, preserving all original points, tracks and IDs.
+`densification.json` records thresholds, input hashes, per-pair checks, skipped
+pairs and whether the requested count was reached. If the images do not support
+enough points, it exports fewer and reports `target_reached: false`; there is
+no duplicate or synthetic padding. These points are for inspection and do not
+change camera validation or the failed metric-scale/ruler acceptance gate.
+
+See [20k results](../../docs/experiments/dense_20k_validation.md).
+
 ## Retry ruler geometry and acceleration scale
 
 ```bash

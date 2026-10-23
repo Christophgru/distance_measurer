@@ -129,6 +129,7 @@ def browser_payload(scene, source_sha256, *, photos=None, excluded=None):
         "metric_scale_applied": False,
         "has_photo_colors": bool(photos),
         "geometry_modified": False,
+        "densification": scene.metadata.get("densification"),
     }
 
 

@@ -7,15 +7,16 @@ export a self-contained Three.js/WebGL viewer:
 
 ```bash
 .venv/bin/python python/scripts/export_scene_web.py \
-  data/processed/2026-10-23_091847_034_be3e7ada/visual_cameras_usable/scene.json \
+  data/processed/2026-10-23_091847_034_be3e7ada/dense_20k/scene.json \
   --session data/raw/2026-10-23_091847_034_be3e7ada \
   --output data/processed/2026-10-23_091847_034_be3e7ada/interactive_scene/index.html
 ```
 
 Open that HTML file in a WebGL 2 browser. The scene, renderer and optional JPEG
 previews are embedded; no internet connection or server is needed. The latest
-export shows **941 accepted sparse points and cameras 2, 3, 7**. It displays
-the saved reconstruction, not an inferred surface or a denser reconstruction.
+export shows **20,000 image-supported points and cameras 2, 3, 7**: 941 original
+sparse points plus 19,059 stereo samples. It displays the saved reconstruction
+and added stereo measurements, without inventing a surface or repeating points.
 Camera positions and point coordinates remain in **arbitrary reconstruction
 units**. The ruler/acceleration metric-scale rejection is unchanged.
 
@@ -36,6 +37,10 @@ Use these controls:
   pixel-registration tool. The frustum itself uses exact saved `K/R/C` corners.
 - Change point size, photo/error/view-count coloring, maximum reprojection
   error and minimum observation count. Filters change visibility only.
+- **Added stereo samples** toggles the new samples; turning it off returns to
+  the original 941-point cloud. Point inspection identifies each point's source.
+  Dense stereo reprojection errors check consistency against fixed cameras and
+  do not independently validate their positions.
 - Toggle points, camera frustums, connecting lines, photo planes and world
   axes. Connecting lines join photo positions, not a continuous IMU path.
   Frustum/photo-plane size is a drawing depth, not a recovered surface distance.
@@ -68,6 +73,24 @@ instructions are in [tools/scene_viewer](../../tools/scene_viewer/README.md).
 The GPU cloud is one draw call; controls redraw on demand. Real-browser tests
 also render a synthetic 100,000-point cloud with the same total draw-call count
 as this three-camera scene, without making a hardware frame-rate claim.
+
+## More image-supported point samples
+
+The current denser input can be reproduced before the browser export above:
+
+```bash
+.venv/bin/python tools/validation/densify_scene.py \
+  data/raw/2026-10-23_091847_034_be3e7ada \
+  --scene data/processed/2026-10-23_091847_034_be3e7ada/visual_cameras_usable/scene.json \
+  --regions tools/validation/measurement_20261023_091847_regions.json \
+  --target-points 20000 \
+  --output data/processed/2026-10-23_091847_034_be3e7ada/dense_20k
+```
+
+This keeps all original points and camera parameters, rectifies overlapping
+images, checks bidirectional stereo and patch appearance, then triangulates
+new point samples. It never pads the requested count with duplicates. Source
+files remain unchanged. See [20k experiment results](../experiments/dense_20k_validation.md).
 
 ## Existing desktop viewer
 

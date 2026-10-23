@@ -58,6 +58,12 @@ try {
   const counts=new Uint32Array(Uint8Array.from(Buffer.from(source.view_counts,'base64')).buffer);
   assert.equal((await state()).visibleCount,Array.from(counts).filter(x=>x>=Math.max(2,source.camera_count)).length);
   await page.locator('#min-views').evaluate(input=>{input.value='2';input.dispatchEvent(new Event('input'));});
+  if(source.densification){
+    await page.locator('#show-dense').uncheck();await waitFrame();
+    assert.equal((await state()).visibleCount,source.densification.original_point_count);
+    await page.locator('#show-dense').check();await waitFrame();
+    assert.equal((await state()).visibleCount,source.point_count);
+  }
   await page.locator(`[data-camera-id="${source.cameras[0].image_id}"]`).click();
   await page.locator('#focus-camera').click();await waitFrame();
   const target=(await state()).target;

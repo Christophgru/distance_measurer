@@ -16,6 +16,9 @@ try {
   const errors = decode('errors', Float32Array), counts = decode('view_counts', Uint32Array);
   const offsets = decode('observation_offsets', Uint32Array), observationImages = decode('observation_images', Uint32Array);
   const observationPixels = decode('observation_pixels', Float32Array), observationErrors = decode('observation_errors', Float32Array);
+  const sparseCount = data.densification?.original_point_count ?? data.point_count;
+  const dense = new Float32Array(data.point_count);
+  if(data.densification) dense.fill(1,sparseCount);
   const viewport = $('viewport'), scene = new THREE.Scene(), origin = new THREE.Vector3(...data.origin);
   scene.background = new THREE.Color('#0b1220');
   const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
@@ -48,11 +51,13 @@ try {
     uMinViews: { value: 2 }, uMode: { value: 0 }, uPick: { value: false },
     uErrorRange: { value: Math.max(3, ...Array.from(errors.slice(0, 10000))) },
     uMaxViews: { value: Math.max(3, data.camera_count) },
+    uShowDense: { value: true },
   };
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(xyz, 3));
   geometry.setAttribute('color', new THREE.BufferAttribute(rgb, 3, true));
   geometry.setAttribute('error', new THREE.BufferAttribute(errors, 1));
+  geometry.setAttribute('dense', new THREE.BufferAttribute(dense, 1));
   geometry.setAttribute('views', new THREE.Float32BufferAttribute(counts, 1));
   const pickingColors = new Float32Array(data.point_count * 3);
   for (let i = 0; i < data.point_count; i++) {
@@ -62,11 +67,11 @@ try {
   geometry.setAttribute('pickColor', new THREE.BufferAttribute(pickingColors, 3));
   geometry.computeBoundingSphere();
   const material = new THREE.ShaderMaterial({ uniforms,
-    vertexShader: `attribute vec3 color; attribute vec3 pickColor; attribute float error; attribute float views;
+    vertexShader: `attribute vec3 color; attribute vec3 pickColor; attribute float error; attribute float views; attribute float dense;
       uniform float uSize, uMaxError, uMinViews, uErrorRange, uMaxViews; uniform int uMode;
-      varying vec3 vColor, vPick; varying float vVisible;
+      uniform bool uShowDense; varying vec3 vColor, vPick; varying float vVisible;
       void main(){
-        vVisible = ((error < 0.0 || error <= uMaxError) && views >= uMinViews) ? 1.0 : 0.0;
+        vVisible = ((error < 0.0 || error <= uMaxError) && views >= uMinViews && (uShowDense || dense < .5)) ? 1.0 : 0.0;
         vColor = color; vPick = pickColor;
         if(uMode==1) vColor = error < 0.0 ? vec3(.55,.65,.75) : mix(vec3(.2,.85,.6),vec3(1.0,.3,.25),clamp(error/uErrorRange,0.0,1.0));
         if(uMode==2) vColor = mix(vec3(.25,.6,1.0),vec3(1.0,.8,.25),clamp((views-2.0)/max(1.0,uMaxViews-2.0),0.0,1.0));
@@ -117,7 +122,7 @@ try {
   selected.visible = false; selected.renderOrder = 20; scene.add(selected);
   const rays = new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: '#ffe16d', transparent: true, opacity: .65, depthTest: false })); rays.visible = false; scene.add(rays);
   const number = x => Number(x).toPrecision(6);
-  const visible = i => (errors[i] < 0 || errors[i] <= uniforms.uMaxError.value) && counts[i] >= uniforms.uMinViews.value;
+  const visible = i => (errors[i] < 0 || errors[i] <= uniforms.uMaxError.value) && counts[i] >= uniforms.uMinViews.value && (uniforms.uShowDense.value || !dense[i]);
   function invalidate(){ if(!pendingFrame){ pendingFrame=true; requestAnimationFrame(render); } }
   function render(){
     pendingFrame=false;
@@ -173,7 +178,7 @@ try {
       observations.push(`Photo ${id}: (${observationPixels[2*j].toFixed(1)}, ${observationPixels[2*j+1].toFixed(1)}) · ${observationErrors[j]<0?'unknown error':observationErrors[j].toFixed(2)+' px'}`);
     }
     rays.geometry.dispose(); rays.geometry=new THREE.BufferGeometry().setAttribute('position',new THREE.Float32BufferAttribute(segments,3)); rays.visible=true;
-    $('point-detail').textContent=`Point ${pointIds[row]} · track ${trackIds[row]}\nWorld: ${point.add(origin).toArray().map(number).join(', ')}\n${counts[row]} observations · max error ${errors[row]<0?'unknown':errors[row].toFixed(3)+' px'}\n${observations.join('\n')}`;
+    $('point-detail').textContent=`Point ${pointIds[row]} · track ${trackIds[row]}\nSource: ${dense[row]?'added stereo sample':'original sparse track'}\nWorld: ${point.add(origin).toArray().map(number).join(', ')}\n${counts[row]} observations · max error ${errors[row]<0?'unknown':errors[row].toFixed(3)+' px'}\n${observations.join('\n')}`;
     $('point-id').value=pointIds[row]; $('focus-point').disabled=false;
     const current=Number($('photo-camera').value);
     if(!Array.from(observationImages.subarray(offsets[row],offsets[row+1])).includes(current)) $('photo-camera').value=observationImages[offsets[row]];
@@ -240,12 +245,14 @@ try {
   $('min-views').max=Math.max(2,data.camera_count);
   function filter(){uniforms.uMaxError.value=Number($('max-error').value);uniforms.uMinViews.value=Number($('min-views').value);visibleCount=0;for(let i=0;i<data.point_count;i++)if(visible(i))visibleCount++;$('error-value').textContent=`${uniforms.uMaxError.value.toFixed(2)} px`;$('views-value').textContent=uniforms.uMinViews.value;if(selectedRow>=0&&!visible(selectedRow))clearPoint();invalidate();}
   $('max-error').oninput=filter;$('min-views').oninput=filter;
+  $('show-dense').onchange=()=>{uniforms.uShowDense.value=$('show-dense').checked;filter();};
   for(const [id,object] of [['show-cloud',cloud],['show-cameras',cameraGroup],['show-path',path],['show-photos',photoGroup],['show-axes',axes]]) $(id).onchange=()=>{object.visible=$(id).checked;invalidate();};
   $('frustum-size').oninput=()=>{const scale=Number($('frustum-size').value);for(const entry of cameraObjects.values()){entry.group.scale.setScalar(scale);if(entry.plane)entry.plane.scale.setScalar(scale);}invalidate();};
   $('photo-camera').onchange=drawPhoto;$('photo').onclick=()=>{if(document.fullscreenElement)document.exitFullscreen();else $('photo').requestFullscreen?.();};
   $('toggle-panel').onclick=()=>$('sidebar').classList.toggle('closed');
   if(matchMedia('(max-width:760px)').matches)$('sidebar').classList.add('closed');
   if(!data.has_photo_colors){$('color-mode').options[0].textContent='Neutral';$('show-photos').disabled=true;}
+  if(data.densification){$('dense-toggle').hidden=false;$('dense-note').hidden=false;$('dense-note').textContent=`${data.densification.added_point_count.toLocaleString()} added stereo samples. Their reprojection error checks consistency with the fixed cameras; it does not certify camera accuracy.`;}
   const warnings=[...new Set(data.warnings.map(s=>s.replace(/^(Input reconstruction: )+/,'')))];
   $('session').textContent=data.session_id;
   $('summary').textContent=`${data.point_count.toLocaleString()} points · ${data.camera_count} cameras · WebGL`;

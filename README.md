@@ -97,13 +97,15 @@ Open the latest reconstruction in the GPU browser viewer:
 
 ```bash
 .venv/bin/python python/scripts/export_scene_web.py \
-  data/processed/2026-10-23_091847_034_be3e7ada/visual_cameras_usable/scene.json \
+  data/processed/2026-10-23_091847_034_be3e7ada/dense_20k/scene.json \
   --session data/raw/2026-10-23_091847_034_be3e7ada \
   --output data/processed/2026-10-23_091847_034_be3e7ada/interactive_scene/index.html
 ```
 
 Open the HTML file in a browser to orbit, pan, zoom, inspect cameras and pick
 points. It works offline, embeds photo context and uses WebGL GPU buffers.
+The current export has 20,000 image-supported points; the viewer guide includes
+the densification command and a toggle to compare with the original sparse cloud.
 See [viewer controls](docs/architecture/scene_viewer.md). Geometry stays in
 reconstruction units; metric scale remains unaccepted.
 
