@@ -6,6 +6,29 @@ image IDs; compass/gyro data cannot supply the missing visual connection.
 Matching diagnostics are retained for review on failure, and the audit exits
 with a nonzero status. See [the overlap gate](../../docs/architecture/overlap_gate.md).
 
+## Compare acceleration with phone-calculated orientation
+
+```bash
+.venv/bin/python tools/validation/compare_recording_imu.py \
+  data/raw/2026-10-23_091847_034_be3e7ada \
+  --output data/processed/2026-10-23_091847_034_be3e7ada/imu_comparison
+```
+
+Open `gravity_comparison.png` for measured device acceleration versus gravity
+predicted from each orientation, `acceleration_comparison.png` for gravity-removed
+world acceleration, and `orientation_comparison.png` for gyro/phone disagreement,
+native increment jumps and compass magnitude. `imu_comparison.json` records
+statistics, validation and source hashes; `imu_comparison.npz` contains aligned
+samples and curves. `--stationary-window START END` declares the rest interval;
+a failed check leaves gyro bias unestimated.
+
+The tool compares gyro integration with the phone rotation vector and optional
+game vector. A single heading alignment handles the game vector's arbitrary yaw
+without hiding tilt differences. These are offline acceleration calculations from
+recorded orientations, not a recorded phone linear-acceleration sensor. Comparison
+disagreement does not establish which orientation is more accurate. See
+[the new recording's results](../../docs/experiments/measurement_20261023_091847_imu.md).
+
 ## Explain the ruler/acceleration size difference
 
 After the pairwise ruler retry, run:

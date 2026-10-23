@@ -156,3 +156,10 @@ heading anchors, preserved gyro tilt, wrap-boundary continuity, missing compass
 or fused orientation, camera-frame timing, reprojection invariance, disconnected
 overlaps and unchanged source hashes. Physical-device validation of new compass
 and JPEG frame-timestamp recording remains outstanding.
+
+The [2026-10-23 recording comparison](../experiments/measurement_20261023_091847_imu.md)
+now confirms capture of all five sensor streams and readable JPEGs, with six
+primary frame timestamps and two request-time fallbacks. Its initial rest window
+fails the stationary checks, so the compass/rest calibration path remains
+unvalidated on that capture. Both phone vectors show nearly identical tilt,
+which differs from pure gyro integration; visual constraints remain important.
