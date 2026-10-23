@@ -102,7 +102,7 @@ try {
   await page.locator('#overview').click();await page.locator('#clear-point').click();await waitFrame();
   // Keep screenshots for actual reconstructions. A synthetic capacity fixture
   // tests rendering/picking without exporting an image of invented geometry.
-  if(source.quality_status!=='synthetic_renderer_capacity_fixture')await page.screenshot({path:path.join(path.dirname(filename),'browser_smoke.png')});
+  if(source.quality_status!=='synthetic_renderer_capacity_fixture'&&process.env.SCENE_SMOKE_SCREENSHOT!=='0')await page.screenshot({path:path.join(path.dirname(filename),'browser_smoke.png'),timeout:120000,animations:'disabled'});
   const desktop=await state();
   const mobile=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,offline:!localOrigin});
   const phone=await mobile.newPage();phone.on('pageerror',e=>failures.push(e.message));

@@ -104,12 +104,13 @@ Open <http://localhost:8765/> to orbit, pan, zoom, inspect cameras and pick
 points. The active workstream separates image-only scene/camera recovery from
 metric scale, which is shelved. The independent reference recovers all eight
 cameras and allows an orange overlay of the previous three-camera estimate.
-Large point lists use BSON batches and a browser worker; all assets stay local.
+The current model has **1,000,000 points and eight cameras**. Large point lists
+use BSON batches and a browser worker; all assets stay local.
 The earlier 20k standalone HTML remains available as `previous_20k.html`.
 See [reference reconstruction and export](docs/architecture/visual_reference.md)
 and [viewer controls](docs/architecture/scene_viewer.md). All coordinates share
-an unknown visual scale. Reported supported point counts can fall below a
-requested two-million-point target; the exporter never pads a reconstruction.
+an unknown visual scale. The accepted density target is one million points;
+the renderer also passed a separate synthetic two-million-point capacity check.
 
 Alternatively, open the older scene in the desktop viewer or export a preview:
 

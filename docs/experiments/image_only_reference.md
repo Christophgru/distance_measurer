@@ -40,3 +40,36 @@ Synthetic checks verify the half-pixel conversion, fixed pose import and gauge
 comparison. Removing `sensors.csv` from a fixture still permits reference image
 preparation. Source hashes protect capture JSON, exclusion polygons and all
 photographs. See [workflow and lecture references](../architecture/visual_reference.md).
+
+## Accepted million-point inspection model
+
+The accepted density target was revised to **1,000,000 points**. The final
+export contains 5,885 sparse feature points and 994,115 native fused depth
+samples, selected from 1,043,882 eligible fused locations. No exact duplicate
+positions required removal. All eight camera poses and the shared lens fit
+remain unchanged during densification. No metric scale is calculated.
+
+The dense pass uses NCC ≥0.3, at least two distinct supporting views, a
+1-pixel fusion reprojection limit, 0.5% relative depth disagreement and
+10-degree normal disagreement. Fusion aggregates at most four measured depth
+pixels per point. The point inspector distinguishes supporting-view projections
+from original sparse feature observations; native fusion does not provide a
+measured reprojection residual for each exported dense point.
+
+Among dense samples, 806,022 have two supporting views, 139,890 have three and
+48,203 have four. The GUI's minimum-observation control exposes this tradeoff.
+A separate strict three-view/NCC-0.5 model retains 111,299 fused samples plus
+the same 5,885 sparse points. Both remain available for comparing coverage.
+
+The main viewer is <http://localhost:8765/>, with a copy under
+`interactive_scene/million_reference/`. The strict reference is under
+`interactive_scene/strict_reference/`; `previous_20k.html` preserves the earlier
+standalone export. The main cloud uses **20 BSON batches**, totaling about
+185.3 MiB uncompressed and 43.8 MiB in gzip transport copies. Record fields are
+unchanged; no database server is involved.
+
+Validation includes 516 Python-suite passes, targeted checks for BSON boundaries,
+pixel-origin conversion, support IDs, duplicate removal and reference export,
+and browser loading/picking/navigation/filter/mobile checks. A separate temporary
+synthetic 2M BSON fixture exercised the same worker and GPU buffers with 19 draw
+calls and was removed afterward. It is not part of the reconstructed scene.

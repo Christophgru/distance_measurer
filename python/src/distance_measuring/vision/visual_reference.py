@@ -220,6 +220,7 @@ def recover_dense_reference(
     min_support_views=3,
     max_reproj_error=1.0,
     max_depth_error=0.005,
+    max_fusion_pixels=10000,
 ):
     """PatchMatch depth/normal estimation and strict multi-view fusion, no scale."""
     import pycolmap as pc
@@ -231,6 +232,8 @@ def recover_dense_reference(
         or min(max_reproj_error, max_depth_error) <= 0
     ):
         raise ValueError("Fusion error limits must be positive and finite")
+    if type(max_fusion_pixels) is not int or max_fusion_pixels < min_support_views:
+        raise ValueError("Fusion aggregation limit must be an integer >= minimum support")
     output = Path(output)
     verify_sources(manifest)
     workspace = output / "mvs"
@@ -244,6 +247,7 @@ def recover_dense_reference(
             and cached["fusion"]["min_num_pixels"] == min_support_views
             and np.isclose(cached["fusion"]["max_reproj_error"], max_reproj_error)
             and np.isclose(cached["fusion"]["max_depth_error"], max_depth_error)
+            and cached["fusion"]["max_num_pixels"] == max_fusion_pixels
             and cached["input_sha256"] == manifest["input_sha256"]
         ):
             verify_sources(manifest)
@@ -324,6 +328,7 @@ def recover_dense_reference(
         mask_path=masks,
         num_threads=8,
         min_num_pixels=min_support_views,
+        max_num_pixels=max_fusion_pixels,
         max_reproj_error=max_reproj_error,
         max_depth_error=max_depth_error,
         max_normal_error=10,

@@ -25,6 +25,7 @@ def main(argv=None):
     parser.add_argument("--min-support-views", type=int, choices=[2, 3], default=3)
     parser.add_argument("--fusion-reprojection-px", type=float, default=1.0)
     parser.add_argument("--fusion-relative-depth", type=float, default=0.005)
+    parser.add_argument("--fusion-max-pixels", type=int, default=10000)
     args = parser.parse_args(argv)
     try:
         raw = Path(__file__).resolve().parents[2] / "data/raw"
@@ -43,6 +44,7 @@ def main(argv=None):
                 min_support_views=args.min_support_views,
                 max_reproj_error=args.fusion_reprojection_px,
                 max_depth_error=args.fusion_relative_depth,
+                max_fusion_pixels=args.fusion_max_pixels,
             )
         return 0
     except (ValueError, OSError, RuntimeError, ImportError) as error:

@@ -102,6 +102,12 @@ def write_cloud_point_lists(
     )
     keep &= np.linalg.norm(normals, axis=1) > 0.5
     available = np.flatnonzero(keep)
+    before_unique = len(available)
+    if before_unique:
+        # Independent fusion groups can converge to exactly the same native
+        # float coordinates. Keep one measured location, never pad with copies.
+        _, first = np.unique(xyz[available], axis=0, return_index=True)
+        available = available[np.sort(first)]
     chosen = (
         available
         if len(available) <= target_points
@@ -123,6 +129,7 @@ def write_cloud_point_lists(
         "native_fused_point_count": len(vertices),
         "minimum_distinct_support_views": min_views,
         "eligible_point_count": len(available),
+        "duplicate_positions_removed": before_unique - len(available),
         "image_ids": image_ids,
         "support_histogram": {
             str(n): int(np.sum(bit_counts[chosen] == n))

@@ -23,7 +23,7 @@ from distance_measuring.vision.visual_reference import verify_sources, write_jso
 from .web_export import browser_payload
 
 
-def export_reference_scene(reference, output, *, target_points=2_000_000, previous_scene=None):
+def export_reference_scene(reference, output, *, target_points=1_000_000, previous_scene=None):
     reference, output = Path(reference).resolve(), Path(output).resolve()
     raw = Path(__file__).resolve().parents[4] / "data/raw"
     if output.is_relative_to(raw) or output.is_relative_to(reference):
@@ -58,6 +58,7 @@ def export_reference_scene(reference, output, *, target_points=2_000_000, previo
         or cloud.get("id_base") != id_base
         or cloud["target_points"] != target_points - len(scene.points)
         or cloud["image_ids"] != image_ids
+        or "duplicate_positions_removed" not in cloud
     ):
         cloud = write_cloud_point_lists(
             ply,

@@ -12,7 +12,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("reference", type=Path)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--target-points", type=int, default=2_000_000)
+    parser.add_argument("--target-points", type=int, default=1_000_000)
     parser.add_argument("--previous-scene", type=Path)
     args = parser.parse_args()
     try:

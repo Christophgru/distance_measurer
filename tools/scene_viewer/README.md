@@ -40,6 +40,9 @@ camera focus/view, source photos and mobile layout. It also creates and removes
 a **synthetic** 100,000-point fixture to verify batched rendering. This fixture
 is separate from the user's reconstructed cloud. `browser_smoke.png` is saved
 beside the supplied HTML. No particular GPU frame rate is claimed by this test.
+`SCENE_SMOKE_SCREENSHOT=0` skips the optional screenshot when a headless software
+compositor stalls on readback; loading, picking, navigation, filters and mobile
+checks still run. The explicit 2M synthetic capacity test skips screenshots.
 
 The cloud uses one `THREE.Points` buffer, binary position/color/ID/observation
 data and shader-side filters. Mouse picking uses a separate ID-color render

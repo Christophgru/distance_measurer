@@ -4,7 +4,11 @@ import struct
 import numpy as np
 import pytest
 
-from distance_measuring.scene.point_lists import read_visibility, write_cloud_point_lists
+from distance_measuring.scene.point_lists import (
+    read_colmap_ply,
+    read_visibility,
+    write_cloud_point_lists,
+)
 from distance_measuring.scene.storage import read_document
 
 
@@ -63,3 +67,14 @@ def test_visibility_rejects_truncation_and_unknown_camera(tmp_path):
     vis.write_bytes(invalid)
     with pytest.raises(ValueError, match="unknown image"):
         read_visibility(vis, 5, 3)
+
+
+def test_exact_duplicate_positions_do_not_pad_target(tmp_path):
+    ply, vis = cloud(tmp_path)
+    vertices = read_colmap_ply(ply)
+    writable = np.memmap(ply, mode="r+", dtype=vertices.dtype, offset=vertices.offset, shape=(5,))
+    writable["x"][3] = 0
+    writable.flush()
+    result = write_cloud_point_lists(ply, vis, [7, 2, 3], tmp_path / "cloud", target_points=10)
+    assert result["point_count"] == 2
+    assert result["duplicate_positions_removed"] == 1

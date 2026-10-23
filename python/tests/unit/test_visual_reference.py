@@ -130,6 +130,7 @@ def test_reference_import_keeps_pose_and_converts_pixel_origin_once():
         {"min_support_views": 1},
         {"max_reproj_error": 0},
         {"max_depth_error": float("inf")},
+        {"max_fusion_pixels": 1},
     ],
 )
 def test_dense_options_reject_invalid_limits_before_writing(tmp_path, monkeypatch, options):

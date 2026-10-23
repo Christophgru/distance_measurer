@@ -18,7 +18,8 @@ Recover the October 23 capture at its native resolution:
 .venv/bin/python python/scripts/reconstruct_visual_reference.py \
   data/raw/2026-10-23_091847_034_be3e7ada \
   --regions tools/validation/measurement_20261023_091847_regions.json \
-  --output data/processed/2026-10-23_091847_034_be3e7ada/visual_reference
+  --output data/processed/2026-10-23_091847_034_be3e7ada/visual_reference_dense_samples \
+  --min-ncc 0.3 --min-support-views 2 --fusion-max-pixels 4
 ```
 
 `--gpu-index` is the CUDA ordinal, which can differ from `nvidia-smi` order.
@@ -41,13 +42,16 @@ are explicitly different support policies; the GUI's minimum-observation filter
 can hide samples with only two supporting views. Keep separate processed output
 directories to retain both native models. The October 23 experiment reuses the
 same saved camera model for both passes; no inertial or scale fitting occurs.
+The accepted million-point export uses that two-view policy with
+`--fusion-max-pixels 4`, limiting local aggregation while preserving the same
+position/depth/normal gates. The default aggregation limit is 10,000 pixels.
 
-Export a two-million-point inspection target, including sparse feature points:
+Export the accepted one-million-point inspection target, including sparse feature points:
 
 ```bash
 .venv/bin/python python/scripts/export_visual_reference.py \
-  data/processed/2026-10-23_091847_034_be3e7ada/visual_reference \
-  --target-points 2000000 \
+  data/processed/2026-10-23_091847_034_be3e7ada/visual_reference_dense_samples \
+  --target-points 1000000 \
   --previous-scene data/processed/2026-10-23_091847_034_be3e7ada/visual_cameras_usable/scene.json \
   --output data/processed/2026-10-23_091847_034_be3e7ada/interactive_scene
 .venv/bin/python -m http.server 8765 --bind 127.0.0.1 \

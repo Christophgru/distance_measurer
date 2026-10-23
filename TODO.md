@@ -20,7 +20,8 @@ The original milestone history below remains intact.
 - [x] Recover an independent eight-camera reference and compare the previous poses.
 - [x] Store point lists above 100,000 points in BSON without changing record fields.
 - [x] Load bounded BSON batches in a worker for GPU scene inspection.
-- [~] Generate and inspect the two-million-point target using genuinely supported samples.
+- [x] Generate a one-million-point inspection model from genuinely supported samples
+  (accepted target revised from two million).
 
 See [visual recovery workflow](docs/architecture/visual_reference.md) and
 [camera comparison](docs/experiments/image_only_reference.md).
