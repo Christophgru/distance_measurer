@@ -110,6 +110,10 @@ The [pairwise/acceleration retry](docs/experiments/ruler_pairwise_acceleration_r
 now passes ruler-reference geometry checks, while acceleration-derived metric
 scale still fails. The measurement engine remains pending.
 
+The [2026-10-23 ruler attempt](docs/experiments/measurement_20261023_091847_ruler.md)
+aborts at visual camera registration for photo 4. Acceleration is reserved for
+scaling after the camera geometry passes; no ruler length is accepted from this run.
+
 Generate red/blue image overlaps and a Matplotlib plot of the estimated phone
 motion with `python tools/validation/visualize_capture.py`. See the
 [visual diagnostics guide](tools/validation/README.md) for full-size outputs,
