@@ -17,6 +17,11 @@ npm run build
 The output is
 `python/src/distance_measuring/visualization/web_assets/viewer.js`. The exporter
 also includes the MIT license from `THREE-LICENSE.txt` in each HTML artifact.
+The build also produces `dense_worker.js`, bundling the Apache-licensed BSON
+decoder. Large reference exports copy that worker, its license and bounded BSON
+sidecars beside the HTML; see [visual reference usage](../../docs/architecture/visual_reference.md).
+Those viewers use a local HTTP server. The smoke test serves only local assets
+for BSON exports and retains the standalone file test for legacy exports.
 
 For browser regression checks, first export a scene with at least two cameras
 and one point, then run:
@@ -25,6 +30,8 @@ and one point, then run:
 npx playwright install chromium
 npx playwright install-deps chromium
 node smoke.mjs /absolute/path/to/exported/index.html
+# Optional explicit 2M BSON capacity fixture (temporary, synthetic data only):
+node bson_throughput.mjs /absolute/path/to/exported/reference/index.html
 ```
 
 The smoke test runs offline in Chromium with SwiftShader on headless hosts.

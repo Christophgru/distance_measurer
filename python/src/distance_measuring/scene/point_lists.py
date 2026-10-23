@@ -117,11 +117,17 @@ def write_cloud_point_lists(
         "format": "bson-point-list-v1",
         "point_count": len(chosen),
         "target_points": target_points,
+        "id_base": id_base,
+        "batch_size": batch_size,
         "target_reached": len(chosen) >= target_points,
         "native_fused_point_count": len(vertices),
         "minimum_distinct_support_views": min_views,
         "eligible_point_count": len(available),
         "image_ids": image_ids,
+        "support_histogram": {
+            str(n): int(np.sum(bit_counts[chosen] == n))
+            for n in range(min_views, len(image_ids) + 1)
+        },
         "shards": [],
         "coordinate_frame": "reference_world",
         "scale_status": "not_estimated_visual_only",

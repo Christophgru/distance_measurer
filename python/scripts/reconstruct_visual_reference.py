@@ -21,6 +21,10 @@ def main(argv=None):
     )
     parser.add_argument("--stage", choices=["sparse", "dense", "all"], default="all")
     parser.add_argument("--max-image-size", type=int, default=4096)
+    parser.add_argument("--min-ncc", type=float, default=0.5)
+    parser.add_argument("--min-support-views", type=int, choices=[2, 3], default=3)
+    parser.add_argument("--fusion-reprojection-px", type=float, default=1.0)
+    parser.add_argument("--fusion-relative-depth", type=float, default=0.005)
     args = parser.parse_args(argv)
     try:
         raw = Path(__file__).resolve().parents[2] / "data/raw"
@@ -31,7 +35,14 @@ def main(argv=None):
             recover_visual_reference(args.output, manifest, gpu_index=args.gpu_index)
         if args.stage in ["dense", "all"]:
             recover_dense_reference(
-                args.output, manifest, gpu_index=args.gpu_index, max_image_size=args.max_image_size
+                args.output,
+                manifest,
+                gpu_index=args.gpu_index,
+                max_image_size=args.max_image_size,
+                min_ncc=args.min_ncc,
+                min_support_views=args.min_support_views,
+                max_reproj_error=args.fusion_reprojection_px,
+                max_depth_error=args.fusion_relative_depth,
             )
         return 0
     except (ValueError, OSError, RuntimeError, ImportError) as error:

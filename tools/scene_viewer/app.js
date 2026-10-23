@@ -5,19 +5,22 @@ const $ = id => document.getElementById(id);
 const fail = error => { $('error').hidden = false; $('error').textContent = `Cannot display the reconstruction.\n${error.message}\nUse a browser with WebGL 2 and hardware acceleration enabled.`; };
 try {
   const data = JSON.parse($('scene-data').textContent);
+  const requestedPointCount=data.point_count;
+  let denseLoading=Boolean(data.dense_cloud),denseError=false,denseProgress='Loading BSON point lists…',denseVisibility=null;
+  if(data.dense_cloud)data.point_count=data.sparse_point_count;
   const decode = (name, Type) => {
     const raw = atob(data[name]);
     const bytes = new Uint8Array(raw.length);
     for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
     return new Type(bytes.buffer);
   };
-  const xyz = decode('positions', Float32Array), rgb = decode('colors', Uint8Array);
-  const pointIds = decode('point_ids', Uint32Array), trackIds = decode('track_ids', Uint32Array);
-  const errors = decode('errors', Float32Array), counts = decode('view_counts', Uint32Array);
+  let xyz = decode('positions', Float32Array), rgb = decode('colors', Uint8Array);
+  let pointIds = decode('point_ids', Uint32Array),errors = decode('errors', Float32Array),counts = decode('view_counts', Uint32Array);
+  const trackIds = decode('track_ids', Uint32Array);
   const offsets = decode('observation_offsets', Uint32Array), observationImages = decode('observation_images', Uint32Array);
   const observationPixels = decode('observation_pixels', Float32Array), observationErrors = decode('observation_errors', Float32Array);
   const sparseCount = data.densification?.original_point_count ?? data.point_count;
-  const dense = new Float32Array(data.point_count);
+  let dense = new Uint8Array(data.point_count);
   if(data.densification) dense.fill(1,sparseCount);
   const viewport = $('viewport'), scene = new THREE.Scene(), origin = new THREE.Vector3(...data.origin);
   scene.background = new THREE.Color('#0b1220');
@@ -59,12 +62,12 @@ try {
   geometry.setAttribute('error', new THREE.BufferAttribute(errors, 1));
   geometry.setAttribute('dense', new THREE.BufferAttribute(dense, 1));
   geometry.setAttribute('views', new THREE.Float32BufferAttribute(counts, 1));
-  const pickingColors = new Float32Array(data.point_count * 3);
-  for (let i = 0; i < data.point_count; i++) {
-    const id = i + 1;
-    pickingColors.set([(id & 255) / 255, ((id >> 8) & 255) / 255, ((id >> 16) & 255) / 255], i * 3);
+  function pickColors(n){
+    const colors=new Uint8Array(n*3);
+    for(let i=0;i<n;i++){const id=i+1;colors.set([id&255,(id>>8)&255,(id>>16)&255],3*i);}
+    return colors;
   }
-  geometry.setAttribute('pickColor', new THREE.BufferAttribute(pickingColors, 3));
+  geometry.setAttribute('pickColor', new THREE.BufferAttribute(pickColors(data.point_count), 3, true));
   geometry.computeBoundingSphere();
   const material = new THREE.ShaderMaterial({ uniforms,
     vertexShader: `attribute vec3 color; attribute vec3 pickColor; attribute float error; attribute float views; attribute float dense;
@@ -92,6 +95,16 @@ try {
   const pickingTarget = new THREE.WebGLRenderTarget(33, 33, { minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter });
   const axes = new THREE.AxesHelper(data.span * .15); axes.position.copy(origin).negate(); scene.add(axes);
   const cameraGroup = new THREE.Group(), photoGroup = new THREE.Group(); scene.add(cameraGroup, photoGroup);
+  const previousGroup=new THREE.Group();previousGroup.visible=false;scene.add(previousGroup);
+  for(const c of data.previous_cameras||[]){
+    const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(c.vertices.flat(),3));g.setIndex(c.lines.flat());
+    const wire=new THREE.LineSegments(g,new THREE.LineBasicMaterial({color:'#ff9b42'}));wire.position.set(...c.center);previousGroup.add(wire);
+  }
+  if(data.previous_cameras?.length){
+    $('previous-toggle').hidden=false;$('show-previous').onchange=()=>{previousGroup.visible=$('show-previous').checked;invalidate();};
+    const relations=data.camera_comparison.relations;
+    $('comparison-note').hidden=false;$('comparison-note').textContent=`Previous ${data.previous_cameras.length}-camera estimate aligned to the same arbitrary frame. Relative rotation differences: ${Math.min(...relations.map(r=>r.relative_rotation_difference_degrees)).toFixed(2)}–${Math.max(...relations.map(r=>r.relative_rotation_difference_degrees)).toFixed(2)}°. Baseline-ratio differences up to ${Math.max(...relations.map(r=>r.baseline_ratio_difference_percent)).toFixed(1)}%. Neither estimate is ground truth.`;
+  }
   const markers = [], cameraObjects = new Map(), photoImages = new Map();
   for (const c of data.cameras) {
     const group = new THREE.Group(); group.position.set(...c.center); cameraGroup.add(group);
@@ -134,19 +147,21 @@ try {
       entry.label.hidden=!cameraGroup.visible || v.z < -1 || v.z > 1 || Math.abs(v.x)>1 || Math.abs(v.y)>1;
       entry.label.style.left=`${(v.x+1)*viewport.clientWidth/2}px`; entry.label.style.top=`${(1-v.y)*viewport.clientHeight/2}px`;
     }
-    $('status').textContent=`${cloud.visible?visibleCount:0} / ${data.point_count} points · ${data.camera_count} cameras · ${renderer.info.render.calls} GPU draw calls · reconstruction units`;
+    $('status').textContent=`${denseLoading?denseProgress+' · ':''}${cloud.visible?visibleCount:0} / ${data.point_count} points · ${data.camera_count} cameras · ${renderer.info.render.calls} GPU draw calls · reconstruction units`;
   }
   function resize(){ renderer.setSize(viewport.clientWidth,viewport.clientHeight,false); camera.aspect=viewport.clientWidth/Math.max(1,viewport.clientHeight); camera.updateProjectionMatrix(); invalidate(); }
   new ResizeObserver(resize).observe(viewport);
   function fit(mode){
     navigation(photoUp(first));
-    const points = mode==='cameras' ? data.cameras.map(c=>c.center) : Array.from({length:data.point_count},(_,i)=>Array.from(xyz.subarray(3*i,3*i+3)));
+    const readyBounds=mode==='cameras'?null:data.point_cloud_bounds?.[mode==='overview'?'overview':'all'];
+    const stride=mode==='overview'?Math.max(1,Math.floor(data.point_count/10000)):1;
+    const points = mode==='cameras' ? data.cameras.map(c=>c.center) : readyBounds?readyBounds.map(p=>[...p]):Array.from({length:Math.ceil(data.point_count/stride)},(_,i)=>Array.from(xyz.subarray(3*i*stride,3*i*stride+3)));
     points.push(...data.cameras.map(c=>c.center));
     if(!points.length) return;
     const low=[],high=[];
     for(let k=0;k<3;k++){
       const values=points.map(p=>p[k]).sort((a,b)=>a-b), last=values.length-1;
-      low[k]=values[mode==='overview'?Math.floor(last*.01):0]; high[k]=values[mode==='overview'?Math.ceil(last*.99):last];
+      low[k]=values[mode==='overview'&&!readyBounds?Math.floor(last*.01):0]; high[k]=values[mode==='overview'&&!readyBounds?Math.ceil(last*.99):last];
       for(const c of data.cameras){low[k]=Math.min(low[k],c.center[k]);high[k]=Math.max(high[k],c.center[k]);}
     }
     const middle=new THREE.Vector3(...low).add(new THREE.Vector3(...high)).multiplyScalar(.5);
@@ -167,21 +182,36 @@ try {
   function focus(position){
     const delta=camera.position.clone().sub(controls.target); controls.target.copy(position); camera.position.copy(position).add(delta); controls.update(); invalidate();
   }
+  function pointObservations(row){
+    if(data.dense_cloud&&row>=sparseCount){
+      const mask=denseVisibility[row-sparseCount],point=new THREE.Vector3().fromArray(xyz,3*row),out=[];
+      data.dense_cloud.image_ids.forEach((id,k)=>{
+        if(!(mask&(1<<k)))return;
+        const c=cameraObjects.get(id)?.data;if(!c)return;
+        const local=point.clone().sub(new THREE.Vector3(...c.center)).toArray();
+        const v=c.R_cw.map(r=>r.reduce((sum,x,j)=>sum+x*local[j],0));if(v[2]<=0)return;
+        out.push({image_id:id,pixel:[(c.K[0][0]*v[0]+c.K[0][1]*v[1])/v[2]+c.K[0][2],c.K[1][1]*v[1]/v[2]+c.K[1][2]],error:-1,projected:true});
+      });return out;
+    }
+    const out=[];for(let j=offsets[row];j<offsets[row+1];j++)out.push({image_id:observationImages[j],pixel:[observationPixels[2*j],observationPixels[2*j+1]],error:observationErrors[j],projected:false});return out;
+  }
   function selectRow(row){
     if(row<0 || row>=data.point_count || !visible(row)){clearPoint();return;}
     selectedRow=row;
     const point=new THREE.Vector3().fromArray(xyz,3*row); selected.geometry.attributes.position.setXYZ(0,...point.toArray()); selected.geometry.attributes.position.needsUpdate=true; selected.geometry.computeBoundingSphere(); selected.visible=true;
     const segments=[],observations=[];
-    for(let j=offsets[row];j<offsets[row+1];j++){
-      const id=observationImages[j], c=cameraObjects.get(id);
+    const pointViews=pointObservations(row);
+    for(const o of pointViews){
+      const id=o.image_id, c=cameraObjects.get(id);
       if(c) segments.push(...point.toArray(),...c.data.center);
-      observations.push(`Photo ${id}: (${observationPixels[2*j].toFixed(1)}, ${observationPixels[2*j+1].toFixed(1)}) · ${observationErrors[j]<0?'unknown error':observationErrors[j].toFixed(2)+' px'}`);
+      observations.push(`Photo ${id}: (${o.pixel[0].toFixed(1)}, ${o.pixel[1].toFixed(1)}) · ${o.projected?'support-view projection':o.error<0?'unknown error':o.error.toFixed(2)+' px'}`);
     }
     rays.geometry.dispose(); rays.geometry=new THREE.BufferGeometry().setAttribute('position',new THREE.Float32BufferAttribute(segments,3)); rays.visible=true;
-    $('point-detail').textContent=`Point ${pointIds[row]} · track ${trackIds[row]}\nSource: ${dense[row]?'added stereo sample':'original sparse track'}\nWorld: ${point.add(origin).toArray().map(number).join(', ')}\n${counts[row]} observations · max error ${errors[row]<0?'unknown':errors[row].toFixed(3)+' px'}\n${observations.join('\n')}`;
+    const fused=Boolean(data.dense_cloud&&dense[row]);
+    $('point-detail').textContent=`Point ${pointIds[row]}${fused?' · fused depth sample':` · track ${trackIds[row]}`}\nSource: ${fused?'multi-view stereo':dense[row]?'added stereo sample':'original sparse track'}\nWorld: ${point.add(origin).toArray().map(number).join(', ')}\n${counts[row]} ${fused?'supporting views':'observations'} · max error ${errors[row]<0?'not recorded per point':errors[row].toFixed(3)+' px'}\n${observations.join('\n')}`;
     $('point-id').value=pointIds[row]; $('focus-point').disabled=false;
     const current=Number($('photo-camera').value);
-    if(!Array.from(observationImages.subarray(offsets[row],offsets[row+1])).includes(current)) $('photo-camera').value=observationImages[offsets[row]];
+    if(pointViews.length&&!pointViews.some(o=>o.image_id===current)) $('photo-camera').value=pointViews[0].image_id;
     drawPhoto(); invalidate();
   }
   function clearPoint(){selectedRow=-1;selected.visible=false;rays.visible=false;$('focus-point').disabled=true;$('point-id').value='';$('point-detail').textContent='Click a point in the scene or enter its ID.';drawPhoto();invalidate();}
@@ -193,10 +223,10 @@ try {
     canvas.width=o>=5?h:w;canvas.height=o>=5?w:h;
     const ctx=canvas.getContext('2d'); const transforms={1:[1,0,0,1,0,0],2:[-1,0,0,1,w,0],3:[-1,0,0,-1,w,h],4:[1,0,0,-1,0,h],5:[0,1,1,0,0,0],6:[0,1,-1,0,h,0],7:[0,-1,-1,0,h,w],8:[0,-1,1,0,0,w]};
     ctx.setTransform(...(transforms[o]||transforms[1]));ctx.drawImage(image,0,0);
-    if(selectedRow>=0){for(let j=offsets[selectedRow];j<offsets[selectedRow+1];j++) if(observationImages[j]===id){
+    if(selectedRow>=0){for(const observation of pointObservations(selectedRow)) if(observation.image_id===id){
       // Lecture 002 pp. 65–76: transform pixel centers with the sampling ratio;
       // EXIF orientation above affects the preview only, never K/R/C or rays.
-      const x=(observationPixels[2*j]+.5)*w/c.image_size[0]-.5,y=(observationPixels[2*j+1]+.5)*h/c.image_size[1]-.5;
+      const x=(observation.pixel[0]+.5)*w/c.image_size[0]-.5,y=(observation.pixel[1]+.5)*h/c.image_size[1]-.5;
       ctx.strokeStyle='#ff4883';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(x-14,y);ctx.lineTo(x+14,y);ctx.moveTo(x,y-14);ctx.lineTo(x,y+14);ctx.stroke();
     }}
   }
@@ -252,14 +282,43 @@ try {
   $('toggle-panel').onclick=()=>$('sidebar').classList.toggle('closed');
   if(matchMedia('(max-width:760px)').matches)$('sidebar').classList.add('closed');
   if(!data.has_photo_colors){$('color-mode').options[0].textContent='Neutral';$('show-photos').disabled=true;}
-  if(data.densification){$('dense-toggle').hidden=false;$('dense-note').hidden=false;$('dense-note').textContent=`${data.densification.added_point_count.toLocaleString()} added stereo samples. Their reprojection error checks consistency with the fixed cameras; it does not certify camera accuracy.`;}
+  if(data.densification){$('dense-toggle').hidden=false;$('dense-note').hidden=false;$('dense-note').textContent=data.dense_cloud?`${data.dense_cloud.point_count.toLocaleString()} fused multi-view samples, loaded from BSON. Supporting-view markers are projections; per-point reprojection errors are not recorded.`:`${data.densification.added_point_count.toLocaleString()} added stereo samples. Their reprojection error checks consistency with the fixed cameras; it does not certify camera accuracy.`;}
+  if(data.dense_cloud?.fusion_checks?.max_reproj_error){
+    const checks=data.dense_cloud.fusion_checks;
+    $('dense-note').textContent+=` Fusion limits: ${checks.max_reproj_error} px, ${(100*checks.max_depth_error).toFixed(1)}% depth disagreement, ${checks.max_normal_error}° normal disagreement; at least ${data.dense_cloud.minimum_distinct_support_views} distinct supporting views.`;
+  }
   const warnings=[...new Set(data.warnings.map(s=>s.replace(/^(Input reconstruction: )+/,'')))];
   $('session').textContent=data.session_id;
   $('summary').textContent=`${data.point_count.toLocaleString()} points · ${data.camera_count} cameras · WebGL`;
   $('provenance').textContent=`Scale: ${data.scale_status}\nQuality: ${data.quality_status}\nSource SHA-256: ${data.source_scene_sha256}\nExcluded camera IDs: ${data.excluded_images.map(c=>c.image_id).join(', ')||'none'}\nOverview fits the central 98%; Fit all includes outliers.\nConnecting lines join photo positions, not a continuous IMU path.\n${warnings.join('\n')}\nRenderer: Three.js ${THREE.REVISION}.`;
   window.__reconstructionViewer = {
-    getState:()=>({ready:true,pointCount:data.point_count,visibleCount,selectedPointId:selectedRow<0?null:pointIds[selectedRow],cameraIds:data.cameras.map(c=>c.image_id),drawCalls:renderer.info.render.calls,cameraPosition:camera.position.toArray(),cameraUp:camera.up.toArray(),target:controls.target.toArray()}),
+    getState:()=>({ready:!denseLoading&&!denseError,pointCount:data.point_count,visibleCount,selectedPointId:selectedRow<0?null:pointIds[selectedRow],cameraIds:data.cameras.map(c=>c.image_id),drawCalls:renderer.info.render.calls,cameraPosition:camera.position.toArray(),cameraUp:camera.up.toArray(),target:controls.target.toArray()}),
     projectPoint:row=>{const v=new THREE.Vector3().fromArray(xyz,3*row).project(camera);return {x:(v.x+1)*viewport.clientWidth/2,y:(1-v.y)*viewport.clientHeight/2,z:v.z};},
   };
   resize();fit('overview');filter();if(first)inspectCamera(first.image_id);
+  if(data.dense_cloud){
+    if(location.protocol==='file:')throw new Error('The BSON model needs its local HTTP server. Open http://localhost:8765/ rather than the HTML file directly.');
+    const worker=new Worker(new URL(data.dense_cloud.worker,location.href));
+    worker.onerror=e=>{denseError=true;denseLoading=false;fail(new Error(e.message));worker.terminate();};
+    worker.onmessage=event=>{
+      const message=event.data;
+      if(message.type==='progress'){denseProgress=`BSON batch ${message.batch}/${message.batches}: ${message.loaded.toLocaleString()} points`;$('summary').textContent=`${message.loaded.toLocaleString()} / ${data.dense_cloud.point_count.toLocaleString()} fused points loaded`;invalidate();return;}
+      if(message.type==='error'){denseError=true;denseLoading=false;fail(new Error(message.message));worker.terminate();return;}
+      if(message.type!=='complete')return;
+      const n=sparseCount+message.ids.length;if(n!==requestedPointCount){denseError=true;fail(new Error('Incomplete BSON model'));worker.terminate();return;}
+      const join=(Type,a,b)=>{const result=new Type(a.length+b.length);result.set(a);result.set(b,a.length);return result;};
+      xyz=join(Float32Array,xyz,message.positions);rgb=join(Uint8Array,rgb,message.colors);pointIds=join(Uint32Array,pointIds,message.ids);
+      const newErrors=new Float32Array(message.ids.length).fill(-1);errors=join(Float32Array,errors,newErrors);
+      denseVisibility=message.visibility;const support=new Uint8Array(message.ids.length);
+      for(let i=0;i<support.length;i++){let value=denseVisibility[i];while(value){value&=value-1;support[i]++;}}
+      counts=join(Uint8Array,counts,support);dense=new Uint8Array(n);dense.fill(1,sparseCount);data.point_count=n;
+      geometry.setAttribute('position',new THREE.BufferAttribute(xyz,3));geometry.setAttribute('color',new THREE.BufferAttribute(rgb,3,true));
+      geometry.setAttribute('error',new THREE.BufferAttribute(errors,1));geometry.setAttribute('views',new THREE.BufferAttribute(counts,1));
+      geometry.setAttribute('dense',new THREE.BufferAttribute(dense,1));geometry.setAttribute('pickColor',new THREE.BufferAttribute(pickColors(n),3,true));geometry.computeBoundingSphere();
+      denseLoading=false;$('summary').textContent=`${n.toLocaleString()} points · ${data.camera_count} cameras · WebGL`;
+      $('point-size').value='1.5';$('point-size').oninput();filter();worker.terminate();invalidate();
+    };
+    const cloudConfig={...data.dense_cloud,shards:data.dense_cloud.shards.map(s=>({...s,url:new URL(s.url,location.href).href}))};
+    worker.postMessage({cloud:cloudConfig,origin:data.origin});
+  }
 } catch(error){ fail(error); }

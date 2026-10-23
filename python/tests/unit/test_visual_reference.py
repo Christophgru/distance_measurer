@@ -1,15 +1,21 @@
 import json
+import sys
 from dataclasses import replace
 from types import SimpleNamespace as Obj
 
 import cv2
 import numpy as np
+import pytest
 from numpy.testing import assert_allclose
 from scipy.spatial.transform import Rotation
 
 from distance_measuring.camera import CameraExtrinsics
 from distance_measuring.vision.reference_model import compare_visual_cameras, scene_from_colmap
-from distance_measuring.vision.visual_reference import prepare_visual_images, verify_sources
+from distance_measuring.vision.visual_reference import (
+    prepare_visual_images,
+    recover_dense_reference,
+    verify_sources,
+)
 
 
 def test_visual_preparation_does_not_read_sensor_csv_and_preserves_stored_pixels(capture, tmp_path):
@@ -115,3 +121,19 @@ def test_reference_import_keeps_pose_and_converts_pixel_origin_once():
     for c, observation in zip(scene.cameras, scene.tracks[0].observations, strict=True):
         assert_allclose(c.intrinsics.project(xyz, c.extrinsics), observation.pixel)
         assert observation.reprojection_error_px == 0.0
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        {"min_ncc": float("nan")},
+        {"min_support_views": 1},
+        {"max_reproj_error": 0},
+        {"max_depth_error": float("inf")},
+    ],
+)
+def test_dense_options_reject_invalid_limits_before_writing(tmp_path, monkeypatch, options):
+    monkeypatch.setitem(sys.modules, "pycolmap", Obj())
+    with pytest.raises(ValueError):
+        recover_dense_reference(tmp_path / "absent", {}, **options)
+    assert not (tmp_path / "absent").exists()

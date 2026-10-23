@@ -15,7 +15,7 @@ header{height:70px;display:flex;align-items:center;justify-content:space-between
 <header><div><h1>Reconstruction Explorer</h1><p id="session"></p></div><div id="summary">Loading reconstruction…</div><button id="toggle-panel" aria-label="Toggle inspection controls">Controls</button></header>
 <main>
 <aside id="sidebar">
-<div class="badge">Reconstruction units · metric scale unaccepted</div>
+<div class="badge">Visual reconstruction · arbitrary units</div>
 <h2>Navigate</h2>
 <div class="row"><button id="overview">Overview</button><button id="fit-all">Fit all</button><button id="fit-cameras">Cameras</button></div>
 <p class="hint">Drag to orbit · wheel/pinch to zoom · right-drag or Shift-drag to pan. Click a point to inspect; double-click it to orbit around it. Touch: one finger orbits, two fingers pan/zoom.</p>
@@ -28,6 +28,8 @@ header{height:70px;display:flex;align-items:center;justify-content:space-between
 <label id="dense-toggle" hidden><input id="show-dense" type="checkbox" checked>Added stereo samples</label>
 <p id="dense-note" class="hint" hidden></p>
 <label><input id="show-cameras" type="checkbox" checked>Camera positions and frustums</label>
+<label id="previous-toggle" hidden><input id="show-previous" type="checkbox">Previous camera estimate · orange</label>
+<p id="comparison-note" class="hint" hidden></p>
 <label><input id="show-path" type="checkbox" checked>Connect photo positions</label>
 <label><input id="show-photos" type="checkbox">Photo planes</label>
 <label><input id="show-axes" type="checkbox" checked>World axes · X red, Y green, Z blue</label>

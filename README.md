@@ -96,18 +96,20 @@ arbitrary visual units with unverified calibration/geometry.
 Open the latest reconstruction in the GPU browser viewer:
 
 ```bash
-.venv/bin/python python/scripts/export_scene_web.py \
-  data/processed/2026-10-23_091847_034_be3e7ada/dense_20k/scene.json \
-  --session data/raw/2026-10-23_091847_034_be3e7ada \
-  --output data/processed/2026-10-23_091847_034_be3e7ada/interactive_scene/index.html
+.venv/bin/python -m http.server 8765 --bind 127.0.0.1 \
+  --directory data/processed/2026-10-23_091847_034_be3e7ada/interactive_scene
 ```
 
-Open the HTML file in a browser to orbit, pan, zoom, inspect cameras and pick
-points. It works offline, embeds photo context and uses WebGL GPU buffers.
-The current export has 20,000 image-supported points; the viewer guide includes
-the densification command and a toggle to compare with the original sparse cloud.
-See [viewer controls](docs/architecture/scene_viewer.md). Geometry stays in
-reconstruction units; metric scale remains unaccepted.
+Open <http://localhost:8765/> to orbit, pan, zoom, inspect cameras and pick
+points. The active workstream separates image-only scene/camera recovery from
+metric scale, which is shelved. The independent reference recovers all eight
+cameras and allows an orange overlay of the previous three-camera estimate.
+Large point lists use BSON batches and a browser worker; all assets stay local.
+The earlier 20k standalone HTML remains available as `previous_20k.html`.
+See [reference reconstruction and export](docs/architecture/visual_reference.md)
+and [viewer controls](docs/architecture/scene_viewer.md). All coordinates share
+an unknown visual scale. Reported supported point counts can fall below a
+requested two-million-point target; the exporter never pads a reconstruction.
 
 Alternatively, open the older scene in the desktop viewer or export a preview:
 

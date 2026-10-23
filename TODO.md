@@ -11,6 +11,20 @@ Legend:
 
 ---
 
+# Current focus — visual recovery at an unknown scale
+
+Metric scale work is shelved while scene shape and camera poses are inspected.
+The original milestone history below remains intact.
+
+- [x] Separate image-only camera/scene recovery from sensor and known-length inputs.
+- [x] Recover an independent eight-camera reference and compare the previous poses.
+- [x] Store point lists above 100,000 points in BSON without changing record fields.
+- [x] Load bounded BSON batches in a worker for GPU scene inspection.
+- [~] Generate and inspect the two-million-point target using genuinely supported samples.
+
+See [visual recovery workflow](docs/architecture/visual_reference.md) and
+[camera comparison](docs/experiments/image_only_reference.md).
+
 # M0 — Repository bootstrap
 
 ## T0.1 Create repository skeleton

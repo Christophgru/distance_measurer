@@ -3,9 +3,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "esbuild app.js --bundle --minify --format=iife --target=es2020 --legal-comments=inline --outfile=../../python/src/distance_measuring/visualization/web_assets/viewer.js"
+    "build": "node build.mjs"
   },
   "dependencies": {
+    "bson": "7.3.3",
     "three": "0.186.1"
   },
   "devDependencies": {

@@ -17,6 +17,10 @@ typed GPU buffers. Those multi-file viewers need a local HTTP server.
 
 ## Interactive browser viewer
 
+The current image-only reference uses local BSON sidecars; follow the
+[reference workflow](visual_reference.md) for that export. The command below
+regenerates the earlier standalone 20k viewer.
+
 For smooth GPU inspection without a desktop graphics window or Matplotlib,
 export a self-contained Three.js/WebGL viewer:
 
@@ -33,7 +37,7 @@ export shows **20,000 image-supported points and cameras 2, 3, 7**: 941 original
 sparse points plus 19,059 stereo samples. It displays the saved reconstruction
 and added stereo measurements, without inventing a surface or repeating points.
 Camera positions and point coordinates remain in **arbitrary reconstruction
-units**. The ruler/acceleration metric-scale rejection is unchanged.
+units**. Metric scale work is currently shelved.
 
 Use these controls:
 

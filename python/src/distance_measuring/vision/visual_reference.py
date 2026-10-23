@@ -210,10 +210,27 @@ def recover_visual_reference(output, manifest, *, gpu_index="0"):
     return model
 
 
-def recover_dense_reference(output, manifest, *, gpu_index="0", max_image_size=4096):
+def recover_dense_reference(
+    output,
+    manifest,
+    *,
+    gpu_index="0",
+    max_image_size=4096,
+    min_ncc=0.5,
+    min_support_views=3,
+    max_reproj_error=1.0,
+    max_depth_error=0.005,
+):
     """PatchMatch depth/normal estimation and strict multi-view fusion, no scale."""
     import pycolmap as pc
 
+    if not np.isfinite(min_ncc) or not 0 < min_ncc < 1 or min_support_views not in [2, 3]:
+        raise ValueError("NCC must lie between 0 and 1; support must be two or three views")
+    if (
+        not np.isfinite([max_reproj_error, max_depth_error]).all()
+        or min(max_reproj_error, max_depth_error) <= 0
+    ):
+        raise ValueError("Fusion error limits must be positive and finite")
     output = Path(output)
     verify_sources(manifest)
     workspace = output / "mvs"
@@ -223,7 +240,10 @@ def recover_dense_reference(output, manifest, *, gpu_index="0", max_image_size=4
         if (
             cached["fused_point_count"] > 0
             and cached["patch_match"]["max_image_size"] == max_image_size
-            and cached["patch_match"]["filter_min_ncc"] == 0.5
+            and abs(cached["patch_match"]["filter_min_ncc"] - min_ncc) < 1e-7
+            and cached["fusion"]["min_num_pixels"] == min_support_views
+            and np.isclose(cached["fusion"]["max_reproj_error"], max_reproj_error)
+            and np.isclose(cached["fusion"]["max_depth_error"], max_depth_error)
             and cached["input_sha256"] == manifest["input_sha256"]
         ):
             verify_sources(manifest)
@@ -274,8 +294,8 @@ def recover_dense_reference(output, manifest, *, gpu_index="0", max_image_size=4
         geom_consistency=True,
         num_iterations=5,
         filter=True,
-        filter_min_ncc=0.5,
-        filter_min_num_consistent=2,
+        filter_min_ncc=min_ncc,
+        filter_min_num_consistent=min_support_views - 1,
         filter_min_triangulation_angle=3,
         filter_geom_consistency_max_cost=1.0,
         cache_size=8,
@@ -294,7 +314,7 @@ def recover_dense_reference(output, manifest, *, gpu_index="0", max_image_size=4
         output / "dense_settings.json",
         {
             "patch_match": patch.todict(),
-            "minimum_distinct_support_views": 3,
+            "minimum_distinct_support_views": min_support_views,
             "scale_status": "not_estimated_visual_only",
         },
     )
@@ -303,9 +323,9 @@ def recover_dense_reference(output, manifest, *, gpu_index="0", max_image_size=4
     fusion = pc.StereoFusionOptions(
         mask_path=masks,
         num_threads=8,
-        min_num_pixels=3,
-        max_reproj_error=1,
-        max_depth_error=0.005,
+        min_num_pixels=min_support_views,
+        max_reproj_error=max_reproj_error,
+        max_depth_error=max_depth_error,
         max_normal_error=10,
         cache_size=8,
     )
@@ -324,6 +344,7 @@ def recover_dense_reference(output, manifest, *, gpu_index="0", max_image_size=4
         "metric_scale_used": False,
         "ruler_lengths_used": False,
         "registered_image_count": ideal.num_reg_images(),
+        "minimum_distinct_support_views": min_support_views,
         "input_sha256": manifest["input_sha256"],
     }
     report["fusion"]["mask_path"] = str(masks)
