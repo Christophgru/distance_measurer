@@ -40,18 +40,24 @@ def search_mask(regions, image_id, size):
         return np.full(size[::-1], 255, np.uint8)
     if regions.get("coordinate_frame") != "normalized_stored_pixels_ignore_exif":
         raise ValueError("Regions must use normalized_stored_pixels_ignore_exif")
-    points = np.asarray(regions["images"][str(image_id)], dtype=float)
-    if (
-        points.ndim != 2
-        or points.shape[1] != 2
-        or len(points) < 3
-        or not np.isfinite(points).all()
-        or np.any(points < 0)
-        or np.any(points > 1)
-    ):
-        raise ValueError("Region polygons must contain >=3 finite normalized 2D points")
+
+    def polygon(value):
+        points = np.asarray(value, dtype=float)
+        if (
+            points.ndim != 2
+            or points.shape[1] != 2
+            or len(points) < 3
+            or not np.isfinite(points).all()
+            or np.any(points < 0)
+            or np.any(points > 1)
+        ):
+            raise ValueError("Region polygons must contain >=3 finite normalized 2D points")
+        return np.rint(points * (np.array(size) - 1)).astype(np.int32)
+
     mask = np.zeros(size[::-1], np.uint8)
-    cv2.fillPoly(mask, [np.rint(points * (np.array(size) - 1)).astype(np.int32)], 255)
+    cv2.fillPoly(mask, [polygon(regions["images"][str(image_id)])], 255)
+    for excluded in regions.get("exclude_images", {}).get(str(image_id), []):
+        cv2.fillPoly(mask, [polygon(excluded)], 0)
     if not mask.any():
         raise ValueError("Search region is empty")
     return mask
@@ -152,8 +158,8 @@ def run(args):
     if output.is_relative_to(session_path) or output.is_relative_to(raw):
         raise ValueError("Audit outputs must be outside raw/session directories")
     count = len(args.image_indices)
-    if count not in (2, 3) or len(set(args.image_indices)) != count:
-        raise ValueError("Select two or three distinct image IDs")
+    if count < 2 or len(set(args.image_indices)) != count:
+        raise ValueError("Select at least two distinct image IDs")
     if not 0 < args.ratio < 1 or not np.isfinite(args.ratio):
         raise ValueError("ratio must be in (0,1)")
     if args.max_tilt not in range(4) or args.max_features < 1 or args.max_image_size < 32:

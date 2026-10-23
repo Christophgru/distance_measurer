@@ -196,6 +196,34 @@ reconstructed continuous IMU trajectory. Positions use **arbitrary reconstructio
 units**, and physical accuracy remains unverified. These diagnostics do not
 change the failed M9 accuracy gate or apply a metric scale.
 
+## Validate all cameras before a new ruler test
+
+`audit_correspondences.py --image-indices` accepts two or more images. Region
+JSON can include `exclude_images`, mapping image IDs to lists of normalized
+stored-pixel polygons. Exclude the reference ruler from camera fitting to keep
+its check independent. The review page shows the two photos participating in
+each pair even when the recording contains more photos.
+
+```bash
+.venv/bin/python tools/validation/reconstruct_visual.py \
+  data/processed/SESSION/visual_matching/correspondences.json \
+  --output data/processed/SESSION/visual_cameras
+```
+
+This reserves complete feature tracks before pose initialization, registers
+every selected camera using visual geometry, refines poses/points with fixed K,
+and validates held-out reprojections. No IMU file or ruler annotation is read.
+Two-view tracks remain usable through nondegenerate visual camera loops; an
+unconstrained camera causes an abort. See [equations and fixed acceptance
+checks](../../docs/math/visual_camera_validation.md).
+
+Inspect `camera_validation.json`: exit 0 means visual validation passed, exit 1
+means validation rejected a fitted scene, and exit 2 means reconstruction failed.
+A reconstruction failure writes a diagnostic report after inputs are verified,
+without exporting a partial scene. Neither success nor failure applies metric
+scale. Only proceed with the new recording's ruler annotations after the camera
+prerequisite passes; the old retry script below is specific to measurement01.
+
 ## Retry ruler geometry and acceleration scale
 
 ```bash
