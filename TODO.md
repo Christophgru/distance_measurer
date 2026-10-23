@@ -667,10 +667,11 @@ orientation jumps unsupported by the gyro. A gyro-orientation trial reaches
 approximately 4.95 cm for 5 cm, but timing/bias sensitivity still exceeds the
 limit; metric scale remains unaccepted.
 
-The [2026-10-23 ruler attempt](docs/experiments/measurement_20261023_091847_ruler.md)
-stops earlier: image-only reconstruction cannot register photo 4 reliably.
-Ruler triangulation and acceleration scaling are aborted until all selected
-camera locations pass independent visual validation.
+The [2026-10-23 subset retry](docs/experiments/measurement_20261023_091847_subset.md)
+now excludes unusable views and retains cameras 2, 3, 7. Visual validation passes;
+ruler observations in photos 2–3 then yield a 10.46% held-out deviation, so the
+10% gate stops measurement. The acceleration fit also rejects a negative scale.
+Camera geometry remains image-only; at least two usable views must remain.
 
 [ ] Implement:
 

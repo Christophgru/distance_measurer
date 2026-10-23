@@ -230,6 +230,38 @@ cameras remains. Inspect `retained_image_ids`, `excluded_images` and
 `candidate_attempts`. This preserves IDs and the original validation split;
 it never chooses views by ruler lengths or acceleration scale.
 
+After camera validation, freeze the scene and estimate acceleration scale:
+
+```bash
+.venv/bin/python tools/validation/estimate_scene_scale.py data/raw/SESSION \
+  --scene data/processed/SESSION/visual_cameras/scene.json \
+  --output data/processed/SESSION/scale_trial
+```
+
+`scale_candidate.json` and `.png` describe the retained views only. Image
+headings constrain gyro propagation; compass supplies one reference when its
+rest checks pass. Integrals are rotated back into the frozen visual coordinate
+frame. The tool does not save a scaled scene or accept metric scale. A completed
+experiment exits 0 even if its signed scale is rejected; read the fit flags.
+Two views with unknown initial velocity yield an explicit unobservable-scale
+result. Known ruler length can provide a separate two-view reference scale.
+
+Check newly annotated ruler points independently:
+
+```bash
+.venv/bin/python tools/validation/validate_ruler_reference.py \
+  data/processed/SESSION/visual_cameras/scene.json ANNOTATIONS.json \
+  --output data/processed/SESSION/ruler_check --allow-unusable-observations
+```
+
+Annotations declare the recording, working-pixel frame/size, cm labels,
+per-view observations and distinct reference/held-out interval indices. Optional
+observation exclusion selects the largest geometrically valid group of at
+least two views, then the best ray angle, **before comparing lengths**. It does
+not drop individual marks to improve a length. A held-out error over 10% rejects
+the check and exits 1. No scene or acceleration fit is changed. See the
+[new capture's subset results](../../docs/experiments/measurement_20261023_091847_subset.md).
+
 ## Retry ruler geometry and acceleration scale
 
 ```bash

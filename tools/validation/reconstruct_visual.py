@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import sys
+from collections import Counter
 from pathlib import Path
 
 from distance_measuring.optimization.bundle import bundle_adjust
@@ -84,17 +85,42 @@ def main(argv=None):
         }
         training, records = split_camera_matches(audit)
         print("Reserved independent feature tracks:", len(records), flush=True)
-        fitted = fit_candidate(training, records, allow_unregistered=args.allow_unusable_images)
-        initial = fitted[0]
+        attempts, fitted, initial = [], None, None
+        try:
+            fitted = fit_candidate(training, records, allow_unregistered=args.allow_unusable_images)
+            initial = fitted[0]
+        except ValueError as error:
+            if not args.allow_unusable_images:
+                raise
+            attempts.append(
+                {"image_ids": audit["image_ids"], "passed": False, "failure_reason": str(error)}
+            )
         candidates = (
             supported_camera_subsets(
                 initial.report["retained_image_ids"], initial.report["pair_poses"]
             )
-            if args.allow_unusable_images
+            if args.allow_unusable_images and initial is not None
             else []
         )
-        attempts = []
+        if args.allow_unusable_images:
+            # A failed larger component must not hide a usable pair elsewhere.
+            counts = Counter(
+                tuple(
+                    i
+                    for i, k in zip(training["image_ids"], r["group_ids"], strict=True)
+                    if k is not None
+                )
+                for r in training["pairwise_matches"]
+                if r["usable_pairwise"]
+            )
+            candidates.extend(
+                pair
+                for pair in sorted(counts, key=lambda p: (-counts[p], p))
+                if counts[pair] >= 30 and pair not in candidates
+            )
         for group in [None, *candidates]:
+            if group is None and fitted is None:
+                continue
             if group is not None:
                 print("Trying visually supported subset:", group, flush=True)
                 try:
@@ -122,8 +148,14 @@ def main(argv=None):
             )
             if quality["passed"]:
                 break
+        if fitted is None:
+            raise ValueError(
+                "No usable group of at least two visual cameras could be reconstructed"
+            )
         retained = [c.image_id for c in scene.cameras]
-        exclusion_reasons = {r["image_id"]: r for r in initial.report["excluded_images"]}
+        exclusion_reasons = (
+            {r["image_id"]: r for r in initial.report["excluded_images"]} if initial else {}
+        )
         excluded = [
             exclusion_reasons.get(
                 i,

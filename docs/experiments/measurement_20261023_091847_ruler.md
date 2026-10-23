@@ -1,5 +1,11 @@
 # New recording: ruler test stops at camera reconstruction
 
+**Follow-up:** the user subsequently permitted excluding unusable views. The
+[subset retry](measurement_20261023_091847_subset.md) retains photos 2, 3, 7,
+passes camera validation and reaches the ruler check. That check fails the
+10% gate; metric scale remains unaccepted. The record below is the original
+strict all-eight-view attempt.
+
 The ruler-reference attempt on `2026-10-23_091847_034_be3e7ada` **aborted before
 ruler triangulation**. Photo **4** could not be registered reliably. There is
 no accepted ruler length, centimetre error or acceleration-derived scale from

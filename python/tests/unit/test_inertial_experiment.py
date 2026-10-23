@@ -95,6 +95,13 @@ def test_constant_velocity_cannot_supply_a_scale_with_unknown_initial_velocity()
     assert result["rejection_reason"] == "unobservable_scale"
 
 
+def test_two_cameras_reconstruct_geometry_but_cannot_separate_scale_from_starting_velocity():
+    result = fit_visual_scale([[0, 0, 0], [1, 0.2, 0]], [0, 2], [[0.3, -0.1, 0]])
+    assert result["fixed_bias_design_rank"] == 3
+    assert result["positive_scale_candidate_m_per_unit"] is None
+    assert result["rejection_reason"] == "unobservable_scale"
+
+
 def test_nonpositive_scale_is_rejected_instead_of_taking_its_absolute_value():
     centers, times, displacements, _ = example(-0.3)
     result = fit_visual_scale(centers, times, displacements)

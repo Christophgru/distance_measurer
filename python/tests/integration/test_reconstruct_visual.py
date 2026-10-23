@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from distance_measuring.camera import CameraExtrinsics, CameraIntrinsics
 
@@ -46,7 +47,8 @@ def test_disconnected_cameras_write_failed_prerequisite_without_a_scene(tmp_path
     assert not (output / "scene.json").exists()
 
 
-def test_subset_cli_keeps_a_valid_pair_and_reports_an_excluded_image(tmp_path):
+@pytest.mark.parametrize("bad_component", [False, True])
+def test_subset_cli_keeps_a_valid_pair_and_reports_an_excluded_image(tmp_path, bad_component):
     source = tmp_path / "matching"
     source.mkdir()
     matches = source / "correspondences.json"
@@ -73,6 +75,28 @@ def test_subset_cli_keeps_a_valid_pair_and_reports_an_excluded_image(tmp_path):
             }
         )
     )
+    if bad_component:
+        audit = json.loads(matches.read_text())
+        audit["image_ids"] += [4, 5]
+        audit["images"] += [{"image_id": i, "working_intrinsics": K.to_dict()} for i in [4, 5]]
+        for r in audit["pairwise_matches"]:
+            r["group_ids"] += [None, None]
+            r["working_pixels"] += [None, None]
+        for pair_id, (a, b) in enumerate([(1, 4), (1, 5), (4, 5)]):
+            for k in range(20):
+                groups, xy = [None] * 5, [None] * 5
+                ia, ib = audit["image_ids"].index(a), audit["image_ids"].index(b)
+                groups[ia] = groups[ib] = 100 + pair_id * 20 + k
+                xy[ia], xy[ib] = pixels[0][k].tolist(), pixels[1][k].tolist()
+                audit["pairwise_matches"].append(
+                    {
+                        "usable_pairwise": True,
+                        "group_ids": groups,
+                        "working_pixels": xy,
+                        "correlation": {"score": 0.99},
+                    }
+                )
+        matches.write_text(json.dumps(audit))
     output = tmp_path / "cameras"
     result = subprocess.run(
         [
@@ -90,7 +114,9 @@ def test_subset_cli_keeps_a_valid_pair_and_reports_an_excluded_image(tmp_path):
     assert result.returncode == 0, result.stdout + result.stderr
     report = json.loads((output / "camera_validation.json").read_text())
     assert report["retained_image_ids"] == [0, 2]
-    assert [r["image_id"] for r in report["excluded_images"]] == [1]
+    assert [r["image_id"] for r in report["excluded_images"]] == (
+        [1, 4, 5] if bad_component else [1]
+    )
     assert report["camera_quality"]["passed"]
     assert not report["metric_scale_applied"]
     assert len(json.loads((output / "scene.json").read_text())["cameras"]) == 2

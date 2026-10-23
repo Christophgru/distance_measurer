@@ -111,18 +111,20 @@ def fit_visual_scale(centers, elapsed, integrated_displacements):
     n = len(centers)
     if (
         centers.shape != (n, 3)
-        or n < 3
+        or n < 2
         or elapsed.shape != (n,)
         or displacement.shape != (n - 1, 3)
         or not all(np.isfinite(x).all() for x in (centers, elapsed, displacement))
         or abs(elapsed[0]) > 1e-12
         or np.any(np.diff(elapsed) <= 0)
     ):
-        raise ValueError("Need >=3 ordered centers/times and aligned displacement integrals")
+        raise ValueError("Need >=2 ordered centers/times and aligned displacement integrals")
     dt = elapsed[1:]
     delta = centers[1:] - centers[0]
     A = np.column_stack([delta.ravel(), np.vstack([-t * np.eye(3) for t in dt])])
     result, _, rank, singular = np.linalg.lstsq(A, displacement.ravel(), rcond=None)
+    # Two images give three equations for scale plus three unknown velocity
+    # components. Return an explicit rank-deficient trial, never a metric scale.
     residual = A @ result - displacement.ravel()
     # If bias is free, s*ΔC-v0*dt+0.5*b*dt²=integral(a_measured).
     # Three poses supply six equations for seven unknowns: scale is generally
