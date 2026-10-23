@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Reconstruction Explorer</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,sans-serif;background:#0b1220;color:#e4edf8}
+*{box-sizing:border-box}body{margin:0}button,input,select{font:inherit}button,select{background:#203149;border:1px solid #425873;color:inherit;border-radius:6px;padding:8px;cursor:pointer}button:hover{background:#304661}button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid #79d9ec;outline-offset:2px}button[aria-pressed=true]{border-color:#7edce8;background:#244352}
+header{height:70px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 20px;border-bottom:1px solid #26374d}h1{font-size:18px;margin:0}header p{margin:4px 0 0;font-size:12px;color:#a5b7cc}#summary{font-size:13px;color:#93e2df;text-align:right}main{display:grid;grid-template-columns:305px 1fr;height:calc(100dvh - 70px)}aside{overflow:auto;padding:16px;border-right:1px solid #26374d;background:#101b2b}h2{font-size:12px;text-transform:uppercase;letter-spacing:.1em;color:#9cb6cf;margin:22px 0 12px}h2:first-child{margin-top:0}label{display:block;font-size:13px;margin:12px 0}input[type=range]{width:100%;accent-color:#6ed7e6}input[type=checkbox]{accent-color:#6ed7e6;margin-right:8px}select{width:100%;margin-top:5px}.row{display:flex;gap:7px;flex-wrap:wrap}.row button{flex:1}.hint{font-size:12px;line-height:1.6;color:#a5b7cc}#viewport{position:relative;overflow:hidden;min-width:0;background:#0b1220}#viewport>canvas{display:block;width:100%;height:100%;touch-action:none}#labels{position:absolute;inset:0;pointer-events:none}.camera-label{position:absolute;border:1px solid var(--color);color:var(--color);border-radius:5px;padding:3px 7px;background:#101b2be8;font-size:12px;font-weight:650;white-space:nowrap;transform:translate(8px,-20px)}#status{position:absolute;left:16px;bottom:12px;max-width:calc(100% - 32px);font-size:12px;background:#101b2bdf;border:1px solid #33455d;border-radius:6px;padding:8px 12px;pointer-events:none;color:#c8d8eb}#error{position:absolute;inset:20%;padding:24px;background:#281d24;border:1px solid #e8a185;border-radius:8px;z-index:10;white-space:pre-wrap;line-height:1.6}#error[hidden]{display:none}#camera-buttons{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}#camera-detail,#point-detail{font-size:12px;line-height:1.6;overflow-wrap:anywhere;white-space:pre-line;margin:10px 0;color:#c9d8e9}.value{float:right;color:#7dd9e6}.photo{width:100%;height:auto;max-height:300px;object-fit:contain;background:#080e18;border-radius:6px;cursor:zoom-in}.photo:fullscreen{max-height:none;object-fit:contain;background:#080e18}.badge{padding:6px 9px;border:1px solid #61503a;background:#332a20;color:#edd2a6;border-radius:5px;font-size:12px;margin-bottom:12px}details{font-size:12px;margin-top:18px;color:#a5b7cc}summary{cursor:pointer}#point-id{width:100%;padding:8px;background:#0d1726;border:1px solid #425873;color:inherit;border-radius:6px}a{color:#7cdae6}#toggle-panel{display:none}#photo-wrapper[hidden]{display:none}
+@media(max-width:760px){header{height:75px;padding:10px 12px}header p{font-size:11px}h1{font-size:15px}#summary{font-size:11px}main{height:calc(100dvh - 75px);grid-template-columns:1fr}aside{position:absolute;z-index:3;top:75px;bottom:0;width:285px;box-shadow:8px 0 20px #0008}aside.closed{display:none}#toggle-panel{display:block}#status{font-size:11px}#error{inset:10%}}
+</style>
+<style>#provenance{white-space:pre-line}</style>
+</head>
+<body>
+<header><div><h1>Reconstruction Explorer</h1><p id="session"></p></div><div id="summary">Loading reconstruction…</div><button id="toggle-panel" aria-label="Toggle inspection controls">Controls</button></header>
+<main>
+<aside id="sidebar">
+<div class="badge">Reconstruction units · metric scale unaccepted</div>
+<h2>Navigate</h2>
+<div class="row"><button id="overview">Overview</button><button id="fit-all">Fit all</button><button id="fit-cameras">Cameras</button></div>
+<p class="hint">Drag to orbit · wheel/pinch to zoom · right-drag or Shift-drag to pan. Click a point to inspect; double-click it to orbit around it. Touch: one finger orbits, two fingers pan/zoom.</p>
+<h2>Display</h2>
+<label>Point size <output class="value" id="size-value">4 px</output><input id="point-size" type="range" min="1" max="12" step="0.5" value="4"></label>
+<label>Color by<select id="color-mode"><option value="0">Photo color</option><option value="1">Reprojection error · green → red</option><option value="2">Observation count · blue → gold</option></select></label>
+<label>Maximum reprojection error <output class="value" id="error-value">All</output><input id="max-error" type="range" min="0" max="3" step="0.05" value="3"></label>
+<label>Minimum observations <output class="value" id="views-value">2</output><input id="min-views" type="range" min="2" max="3" step="1" value="2"></label>
+<label><input id="show-cloud" type="checkbox" checked>Reconstructed points</label>
+<label><input id="show-cameras" type="checkbox" checked>Camera positions and frustums</label>
+<label><input id="show-path" type="checkbox" checked>Connect photo positions</label>
+<label><input id="show-photos" type="checkbox">Photo planes</label>
+<label><input id="show-axes" type="checkbox" checked>World axes · X red, Y green, Z blue</label>
+<label>Camera drawing size<input id="frustum-size" type="range" min="0.25" max="3" step="0.05" value="1"></label>
+<h2>Cameras</h2><div id="camera-buttons"></div><div id="camera-detail">Select a camera to inspect its position.</div>
+<div class="row"><button id="camera-view" disabled>View from camera</button><button id="focus-camera" disabled>Focus camera</button></div>
+<h2>Point inspection</h2><input id="point-id" type="text" placeholder="Find a persisted point ID" aria-label="Persisted point ID"><div id="point-detail">Click a point in the scene or enter its ID.</div>
+<div class="row"><button id="focus-point" disabled>Focus point</button><button id="clear-point">Clear</button></div>
+<div id="photo-wrapper" hidden><h2>Photo observations</h2><select id="photo-camera" aria-label="Photo camera"></select><canvas id="photo" class="photo" aria-label="Source photo with selected point observation"></canvas><p class="hint">Selected observation marked in pink. Click the photo for full screen.</p></div>
+<details><summary>Source and quality</summary><div id="provenance" class="hint"></div></details>
+</aside>
+<div id="viewport"><div id="labels"></div><div id="status">Preparing GPU buffers…</div><div id="error" role="alert" hidden></div></div>
+</main>
+<script type="application/json" id="scene-data">__SCENE_DATA__</script>
+<script>__VIEWER_SCRIPT__</script>
+</body>
+</html>

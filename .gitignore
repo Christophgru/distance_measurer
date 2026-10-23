@@ -28,3 +28,6 @@ htmlcov/
 .idea/
 .vscode/
 .DS_Store
+
+# Browser viewer build dependencies (the offline bundle is committed).
+node_modules/

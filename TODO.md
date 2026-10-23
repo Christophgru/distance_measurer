@@ -620,6 +620,11 @@ and source hashes. The Python suite passes 375 tests; actual Open3D rendering wa
 verified under a virtual display. See `docs/experiments/m8_viewer_validation.md`
 and `docs/architecture/scene_viewer.md`. Scale and quality warnings remain explicit.
 
+The [GPU browser viewer](docs/architecture/scene_viewer.md) additionally exports
+an offline interactive HTML artifact with orbit/pan/zoom, camera views, photo
+planes, GPU point picking, observation rays and quality filters. The latest
+export contains 941 points and cameras 2, 3, 7; geometry and scale are unchanged.
+
 ## T8.1 Open3D viewer
 
 [x] Show:

@@ -1,0 +1,15 @@
+{
+  "name": "reconstruction-explorer",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "esbuild app.js --bundle --minify --format=iife --target=es2020 --legal-comments=inline --outfile=../../python/src/distance_measuring/visualization/web_assets/viewer.js"
+  },
+  "dependencies": {
+    "three": "0.186.1"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "playwright": "1.56.1"
+  }
+}

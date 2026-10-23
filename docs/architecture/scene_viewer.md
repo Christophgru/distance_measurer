@@ -1,5 +1,76 @@
 # M8 desktop viewer and point selection
 
+## Interactive browser viewer
+
+For smooth GPU inspection without a desktop graphics window or Matplotlib,
+export a self-contained Three.js/WebGL viewer:
+
+```bash
+.venv/bin/python python/scripts/export_scene_web.py \
+  data/processed/2026-10-23_091847_034_be3e7ada/visual_cameras_usable/scene.json \
+  --session data/raw/2026-10-23_091847_034_be3e7ada \
+  --output data/processed/2026-10-23_091847_034_be3e7ada/interactive_scene/index.html
+```
+
+Open that HTML file in a WebGL 2 browser. The scene, renderer and optional JPEG
+previews are embedded; no internet connection or server is needed. The latest
+export shows **941 accepted sparse points and cameras 2, 3, 7**. It displays
+the saved reconstruction, not an inferred surface or a denser reconstruction.
+Camera positions and point coordinates remain in **arbitrary reconstruction
+units**. The ruler/acceleration metric-scale rejection is unchanged.
+
+Use these controls:
+
+- Left-drag to orbit; right-drag or Shift-drag to pan; wheel to zoom. Touch uses
+  one finger to orbit and two fingers to pan/zoom.
+- **Overview** fits the central 98% of geometry to avoid extreme outliers
+  setting the view. **Fit all** includes every point; **Cameras** fits their
+  positions. These controls move the inspection viewpoint only.
+- Click a point, or enter its persisted ID, to inspect its world position,
+  track ID, observations and reprojection errors. Yellow lines show its
+  observation rays to the cameras. Double-click a point to orbit around it.
+- Select a camera by its numbered button or center marker. **Focus camera**
+  puts the orbit center there. **View from camera** uses its saved center,
+  optical direction, photo-up orientation and vertical field of view. The
+  browser aspect changes the horizontal viewport; this is not a full-frame
+  pixel-registration tool. The frustum itself uses exact saved `K/R/C` corners.
+- Change point size, photo/error/view-count coloring, maximum reprojection
+  error and minimum observation count. Filters change visibility only.
+- Toggle points, camera frustums, connecting lines, photo planes and world
+  axes. Connecting lines join photo positions, not a continuous IMU path.
+  Frustum/photo-plane size is a drawing depth, not a recovered surface distance.
+- With source photos embedded, the photo panel marks the selected point's
+  recorded observation. Click the photo for full screen. EXIF orientation is
+  applied only to its preview; geometry remains in stored-pixel coordinates.
+
+`--session` is optional. Without it the viewer has neutral point colors and
+no photo planes/previews. With calibrated input, supply the same original
+`--calibration FILE` used during matching. The exporter checks working `K`,
+resizes/undistorts the photo consistently and samples a point's color from its
+best-error observation. Source hashes, retained/excluded IDs and quality status
+remain available under **Source and quality**.
+
+The exporter never refits geometry, decimates the cloud, applies scale or writes
+to its source scene/raw session. It stores float32 GPU positions relative to a
+display origin and restores world coordinates in inspection labels. Persisted
+IDs and observation associations remain exact; unsigned IDs above 32 bits are
+rejected rather than truncated. The renderer supports up to 16,777,214 points.
+
+If a browser/file launcher needs an HTTP URL, serve just the export folder:
+
+```bash
+.venv/bin/python -m http.server 8765 --bind 127.0.0.1 \
+  --directory data/processed/2026-10-23_091847_034_be3e7ada/interactive_scene
+```
+
+Then open `http://localhost:8765/`. Renderer development and browser regression
+instructions are in [tools/scene_viewer](../../tools/scene_viewer/README.md).
+The GPU cloud is one draw call; controls redraw on demand. Real-browser tests
+also render a synthetic 100,000-point cloud with the same total draw-call count
+as this three-camera scene, without making a hardware frame-rate claim.
+
+## Existing desktop viewer
+
 From the repository root with the Python environment active, open the M7 scene:
 
 ```bash
