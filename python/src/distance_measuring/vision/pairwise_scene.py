@@ -4,7 +4,7 @@ Essential/PnP initialization and track linking extend the lecture geometry.
 Points observed in only two images remain eligible. Ruler lengths are not inputs.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from itertools import combinations
 
 import cv2
@@ -14,7 +14,7 @@ from distance_measuring.camera import CameraExtrinsics
 from distance_measuring.scene import Observation, Scene, SceneCamera, ScenePoint, SceneTrack
 from distance_measuring.scene.model import intrinsics_from_dict
 
-from .overlap import require_connected_overlap
+from .overlap import DisconnectedOverlapError, require_connected_overlap
 from .pose import estimate_essential, recover_relative_pose
 from .tracks import MatchEdge, build_tracks
 from .triangulation import triangulate_point
@@ -165,11 +165,14 @@ def _pairwise_pose_initialization(image_id, hypotheses, poses, tracks, points, c
     return None, None
 
 
-def rebuild_pairwise_scene(audit, *, refine_incremental=False, seed_strategy="support"):
+def rebuild_pairwise_scene(
+    audit, *, refine_incremental=False, seed_strategy="support", allow_unregistered=False
+):
     """Visual seed, incremental PnP/triangulation and optional BA; fixed K.
 
     Neither acceleration nor known object distances enter camera estimation.
-    Every selected camera must register; unresolved views cause an error.
+    Strict mode requires every selected camera. Optional subset mode reports
+    excluded views and retains at least two visually constrained cameras.
     """
     ids = audit["image_ids"]
     if seed_strategy not in ("support", "conditioned"):
@@ -196,7 +199,40 @@ def rebuild_pairwise_scene(audit, *, refine_incremental=False, seed_strategy="su
             points[image_id][key] = pixel
         edges.append(MatchEdge((i, a), (j, b), 1 - row["correlation"]["score"]))
         by_pair[i, j].append(row)
-    require_connected_overlap(ids, [pair for pair, rows in by_pair.items() if len(rows) >= 8])
+
+    def overlap_or_subset(edges, stage):
+        try:
+            return require_connected_overlap(ids, edges, stage=stage)
+        except DisconnectedOverlapError as error:
+            if not allow_unregistered:
+                raise
+            # Choose by TRAINING support only, before held-out/ruler/IMU results.
+            component = max(
+                error.components,
+                key=lambda c: (len(c), sum(len(by_pair[e]) for e in edges if set(e) <= set(c))),
+            )
+            if len(component) < 2:
+                raise ValueError("Fewer than two usable overlapping images remain") from error
+            from .validation import subset_camera_matches
+
+            subset = rebuild_pairwise_scene(
+                subset_camera_matches(audit, component),
+                refine_incremental=refine_incremental,
+                seed_strategy=seed_strategy,
+                allow_unregistered=True,
+            )
+            excluded = subset.report["excluded_images"] + [
+                {"image_id": i, "reason": "outside_selected_visual_component", "stage": stage}
+                for i in ids
+                if i not in component
+            ]
+            return replace(subset, report={**subset.report, "excluded_images": excluded})
+
+    overlap = overlap_or_subset(
+        [pair for pair, rows in by_pair.items() if len(rows) >= 8], "verified correspondences"
+    )
+    if isinstance(overlap, PairwiseSceneResult):
+        return overlap
     linked = build_tracks(edges)
     metadata = {
         "session_id": audit["session_id"],
@@ -241,7 +277,9 @@ def rebuild_pairwise_scene(audit, *, refine_incremental=False, seed_strategy="su
         }
         pair_scenes[i, j] = _scene(linked.tracks, points, cameras, poses, metadata)
         hypotheses[i, j] = (pose, poses, rows)
-    overlap = require_connected_overlap(ids, list(hypotheses), stage="verified visual poses")
+    overlap = overlap_or_subset(list(hypotheses), "verified visual poses")
+    if isinstance(overlap, PairwiseSceneResult):
+        return overlap
     # Select by pose support BEFORE inspecting ruler ticks or IMU scale.
     if seed_strategy == "conditioned":
         # Lecture 002 pp. 133–136: nearly parallel rays amplify depth error.
@@ -289,7 +327,7 @@ def rebuild_pairwise_scene(audit, *, refine_incremental=False, seed_strategy="su
             seed_points[track.track_id] = result.position
     scene = _scene(linked.tracks, points, cameras, poses, metadata)
     initial_seed_point_count = len(seed_points)
-    registrations, refinements = [], []
+    registrations, refinements, excluded = [], [], []
     remaining = set(ids) - set(seed)
     while remaining:
         candidates = []
@@ -364,6 +402,16 @@ def rebuild_pairwise_scene(audit, *, refine_incremental=False, seed_strategy="su
                         break
         if not registered:
             counts = {i: len(rows) for i, rows in candidates}
+            if allow_unregistered:
+                excluded = [
+                    {
+                        "image_id": i,
+                        "reason": "visual_registration_failed",
+                        "shared_3d_point_count": counts[i],
+                    }
+                    for i in sorted(remaining)
+                ]
+                break
             raise ValueError(
                 "Visual registration failed (insufficient shared points, failed PnP, "
                 "or unconstrained visual baselines) for remaining images "
@@ -374,6 +422,8 @@ def rebuild_pairwise_scene(audit, *, refine_incremental=False, seed_strategy="su
         pair_scenes,
         {
             "seed_image_ids": list(seed),
+            "retained_image_ids": sorted(poses),
+            "excluded_images": excluded,
             "seed_strategy": seed_strategy,
             "seed_point_count": initial_seed_point_count,
             "pnp_image_id": registrations[0]["image_id"]
@@ -389,6 +439,10 @@ def rebuild_pairwise_scene(audit, *, refine_incremental=False, seed_strategy="su
             "track_conflicts": len(linked.conflicts),
             "accepted_point_count": len(scene.points),
             "pair_poses": pair_reports,
-            "overlap": overlap,
+            "overlap": require_connected_overlap(
+                sorted(poses),
+                [e for e in hypotheses if set(e) <= set(poses)],
+                stage="retained visual poses",
+            ),
         },
     )

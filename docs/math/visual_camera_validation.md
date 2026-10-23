@@ -5,6 +5,22 @@ read acceleration, compass headings, ruler coordinates or ruler lengths.
 All selected images must register. A connected matching graph alone is not
 sufficient to establish their camera centers.
 
+This describes strict mode. `reconstruct_visual.py --allow-unusable-images`
+implements the user's subsequent instruction to continue with at least two
+usable views. Disconnected components and unregistered views can be excluded,
+with IDs and reasons retained in the report. If the remaining fit fails quality
+checks, the tool tries smaller groups ranked by visual training support, larger
+groups first, down to pairs. Conservative fallback groups require at least 20
+pose inliers per pair; this is not a universal all-to-all-overlap requirement.
+All accepted groups meet the same camera quality thresholds below.
+
+The original held-out tracks are split once, before any candidate is fitted.
+Their observations never enter pose optimization. The first passing candidate
+is selected using visual validation, so this split is a **model-selection
+validation set**, not an independent final accuracy certificate. Every candidate
+attempt is reported. Ruler observations, lengths and acceleration remain absent
+from both ranking and selection. The ruler remains an independent final check.
+
 The correspondence audit supports two or more images. Normalized search masks
 can exclude changing screens, repeated logos and the whole reference ruler.
 Pairwise matching does not require a feature to appear in three photos.

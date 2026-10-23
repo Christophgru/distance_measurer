@@ -224,6 +224,12 @@ without exporting a partial scene. Neither success nor failure applies metric
 scale. Only proceed with the new recording's ruler annotations after the camera
 prerequisite passes; the old retry script below is specific to measurement01.
 
+Add `--allow-unusable-images` to exclude unsupported photos and try smaller
+visually supported groups, stopping only when no valid group of at least two
+cameras remains. Inspect `retained_image_ids`, `excluded_images` and
+`candidate_attempts`. This preserves IDs and the original validation split;
+it never chooses views by ruler lengths or acceleration scale.
+
 ## Retry ruler geometry and acceleration scale
 
 ```bash

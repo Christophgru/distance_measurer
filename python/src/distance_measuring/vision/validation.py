@@ -14,6 +14,61 @@ from .tracks import MatchEdge, build_tracks
 from .triangulation import triangulate_point
 
 
+def subset_camera_matches(audit, image_ids):
+    """Select views without changing their IDs, coordinates or correspondences."""
+    ids = audit["image_ids"]
+    selected = [i for i in ids if i in image_ids]
+    if len(selected) < 2 or set(selected) != set(image_ids):
+        raise ValueError("A camera subset needs at least two existing image IDs")
+    indices = [ids.index(i) for i in selected]
+    result = copy.deepcopy(audit)
+    result["image_ids"] = selected
+    result["images"] = [r for r in result["images"] if r["image_id"] in selected]
+    result["pairwise_matches"] = []
+    for row in audit["pairwise_matches"]:
+        present = {i for i, k in zip(ids, row["group_ids"], strict=True) if k is not None}
+        if not present <= set(selected):
+            continue
+        copied = copy.deepcopy(row)
+        for key in ("group_ids", "working_pixels", "display_pixels"):
+            if key in copied:
+                copied[key] = [copied[key][n] for n in indices]
+        result["pairwise_matches"].append(copied)
+    return result
+
+
+def subset_camera_holdout(records, image_ids):
+    """Keep every reserved observation in retained views; require >=2 views."""
+    return [
+        {**r, "observations": obs}
+        for r in records
+        if len(obs := [o for o in r["observations"] if o["image_id"] in image_ids]) >= 2
+    ]
+
+
+def supported_camera_subsets(image_ids, pair_poses):
+    """Rank fallback groups using TRAINING pose support, never metric lengths.
+
+    Dense groups first, then pairs; this is a conservative fallback, not a
+    requirement that every valid reconstruction have all-to-all overlap.
+    """
+    support = {tuple(r["image_ids"]): r["pose_inliers"] for r in pair_poses}
+    candidates = []
+    for size in range(len(image_ids) - 1, 1, -1):
+        groups = [
+            group
+            for group in combinations(sorted(image_ids), size)
+            if all(support.get(pair, 0) >= 20 for pair in combinations(group, 2))
+        ]
+        candidates.extend(
+            sorted(
+                groups,
+                key=lambda g: (-sum(support[p] for p in combinations(g, 2)), g),
+            )
+        )
+    return candidates
+
+
 def split_camera_matches(audit, every=5):
     """Reserve complete physical-location tracks before any camera pose fit."""
     if type(every) is not int or every < 2:

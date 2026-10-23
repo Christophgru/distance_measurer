@@ -15,6 +15,9 @@ from distance_measuring.vision.validation import (
     evaluate_camera_holdout,
     prune_visual_outliers,
     split_camera_matches,
+    subset_camera_holdout,
+    subset_camera_matches,
+    supported_camera_subsets,
 )
 
 
@@ -143,6 +146,12 @@ def test_pair_only_tracks_register_visual_baseline_loops_but_refuse_collinear_sc
     if collinear:
         with pytest.raises(ValueError, match="remaining images"):
             rebuild_pairwise_scene(audit, refine_incremental=True, seed_strategy="conditioned")
+        partial = rebuild_pairwise_scene(
+            audit, refine_incremental=True, seed_strategy="conditioned", allow_unregistered=True
+        )
+        assert len(partial.scene.cameras) == 2
+        assert len(partial.report["excluded_images"]) == 2
+        assert_allclose(reprojection_residuals(partial.scene), 0, atol=1e-4)
     else:
         result = rebuild_pairwise_scene(audit, refine_incremental=True, seed_strategy="conditioned")
         assert len(result.scene.cameras) == 4
@@ -151,3 +160,45 @@ def test_pair_only_tracks_register_visual_baseline_loops_but_refuse_collinear_sc
         )
         assert all(len(t.observations) == 2 for t in result.scene.tracks)
         assert_allclose(reprojection_residuals(result.scene), 0, atol=1e-4)
+
+
+def test_subset_keeps_two_nonconsecutive_views_and_original_reserved_tracks(visual_audit):
+    training, reserved = split_camera_matches(visual_audit)
+    audit = subset_camera_matches(training, [0, 3, 7])
+    audit["pairwise_matches"] = [r for r in audit["pairwise_matches"] if r["group_ids"][2] is None]
+    original = copy.deepcopy(audit)
+    with pytest.raises(ValueError, match="Disconnected"):
+        rebuild_pairwise_scene(audit)
+    result = rebuild_pairwise_scene(audit, allow_unregistered=True)
+    assert [c.image_id for c in result.scene.cameras] == [0, 3]
+    assert [r["image_id"] for r in result.report["excluded_images"]] == [7]
+    assert audit == original
+    holdout = subset_camera_holdout(reserved, [0, 3])
+    assert len(holdout) == len(reserved)
+    assert all([o["image_id"] for o in r["observations"]] == [0, 3] for r in holdout)
+    quality = camera_fit_quality(
+        result.scene,
+        evaluate_camera_holdout(result.scene, holdout),
+        converged=True,
+        removed_fraction=0,
+    )
+    assert quality["passed"]
+    assert all(len(r["observations"]) == 8 for r in reserved)
+
+
+def test_subset_still_aborts_when_no_two_overlapping_cameras_remain(visual_audit):
+    audit = subset_camera_matches(visual_audit, [0, 3])
+    audit["pairwise_matches"] = []
+    with pytest.raises(ValueError, match="Fewer than two"):
+        rebuild_pairwise_scene(audit, allow_unregistered=True)
+
+
+def test_fallback_groups_use_only_visual_support_and_try_larger_groups_first():
+    rows = [
+        {"image_ids": [a, b], "pose_inliers": n}
+        for a, b, n in [(0, 1, 40), (0, 2, 50), (1, 2, 60), (2, 3, 100)]
+    ]
+    groups = supported_camera_subsets([0, 1, 2, 3], rows)
+    assert groups[0] == (0, 1, 2)
+    assert groups[1] == (2, 3)
+    assert all(len(g) >= 2 for g in groups)
