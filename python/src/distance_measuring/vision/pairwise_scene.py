@@ -14,6 +14,7 @@ from distance_measuring.camera import CameraExtrinsics
 from distance_measuring.scene import Observation, Scene, SceneCamera, ScenePoint, SceneTrack
 from distance_measuring.scene.model import intrinsics_from_dict
 
+from .overlap import require_connected_overlap
 from .pose import estimate_essential, recover_relative_pose
 from .tracks import MatchEdge, build_tracks
 from .triangulation import triangulate_point
@@ -86,6 +87,7 @@ def rebuild_pairwise_scene(audit):
             points[image_id][key] = pixel
         edges.append(MatchEdge((i, a), (j, b), 1 - row["correlation"]["score"]))
         by_pair[i, j].append(row)
+    require_connected_overlap(ids, [pair for pair, rows in by_pair.items() if len(rows) >= 8])
     linked = build_tracks(edges)
     metadata = {
         "session_id": audit["session_id"],
@@ -121,7 +123,7 @@ def rebuild_pairwise_scene(audit):
                 "failure": pose.failure,
             }
         )
-        if pose.R is None:
+        if pose.R is None or pose.inliers.sum() < 8:
             continue
         poses = {
             i: CameraExtrinsics(np.eye(3), np.zeros(3)),
@@ -129,8 +131,7 @@ def rebuild_pairwise_scene(audit):
         }
         pair_scenes[i, j] = _scene(linked.tracks, points, cameras, poses, metadata)
         hypotheses[i, j] = (pose, poses, rows)
-    if not hypotheses:
-        raise ValueError("No audited pair supplies a valid visual pose")
+    overlap = require_connected_overlap(ids, list(hypotheses), stage="verified visual poses")
     # Select by pose support BEFORE inspecting ruler ticks or IMU scale.
     seed = max(
         hypotheses, key=lambda key: (int(hypotheses[key][0].inliers.sum()), len(by_pair[key]), key)
@@ -192,5 +193,6 @@ def rebuild_pairwise_scene(audit):
             "track_conflicts": len(linked.conflicts),
             "accepted_point_count": len(scene.points),
             "pair_poses": pair_reports,
+            "overlap": overlap,
         },
     )

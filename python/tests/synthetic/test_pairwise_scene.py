@@ -90,5 +90,5 @@ def test_missing_overlap_for_remaining_camera_stops_connected_reconstruction():
     audit["pairwise_matches"] = [
         r for r in audit["pairwise_matches"] if r["group_ids"][0] is None or r["group_ids"][0] < 2
     ]
-    with pytest.raises(ValueError, match="Fewer than eight"):
+    with pytest.raises(ValueError, match="Disconnected image overlap"):
         rebuild_pairwise_scene(audit)

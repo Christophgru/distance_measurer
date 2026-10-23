@@ -85,6 +85,29 @@ def test_featureless_two_images_report_no_usable_points(capture_factory, tmp_pat
     assert (output / "review.html").exists()
 
 
+def test_one_good_pair_cannot_hide_an_isolated_third_image(capture_factory, tmp_path):
+    capture = capture_factory(image_count=3)
+    rng = np.random.default_rng(918)
+    first = cv2.GaussianBlur(rng.integers(15, 220, (240, 320), np.uint8), (3, 3), 0.6)
+    second = cv2.warpAffine(first, np.array([[1, 0, 9], [0, 1, -4]], np.float32), (320, 240))
+    blank = np.full_like(first, 127)
+    for event, image in zip(
+        [e for e in capture.events if e["type"] == "image"], [first, second, blank], strict=True
+    ):
+        assert cv2.imwrite(str(capture.path / event["filename"]), image)
+        event["metadata"].update(width=320, height=240, exif_orientation=1, rotation_degrees=0)
+    capture.write()
+    output = tmp_path / "isolated_audit"
+    result = run(capture, output, "--image-indices", "0", "1", "2")
+    assert result.returncode == 1
+    assert "Disconnected image overlap" in result.stderr and "[2]" in result.stderr
+    report = json.loads((output / "correspondences.json").read_text())
+    assert report["pairwise_usable_count"] > 8
+    assert report["overlap"]["components"] == [[0, 1], [2]]
+    assert report["quality_status"] == "disconnected_overlap"
+    assert (output / "review.html").exists()  # retained solely to inspect the failure
+
+
 @pytest.mark.parametrize(
     "option", [["--ratio", "nan"], ["--image-indices", "0"], ["--image-indices", "0", "0"]]
 )

@@ -8,6 +8,7 @@ import argparse
 import base64
 import hashlib
 import json
+import sys
 from itertools import combinations
 from pathlib import Path
 
@@ -25,6 +26,7 @@ from distance_measuring.vision.consistency import (
 )
 from distance_measuring.vision.correlation import correlate_pair_matches
 from distance_measuring.vision.epipolar import estimate_fundamental
+from distance_measuring.vision.overlap import DisconnectedOverlapError, require_connected_overlap
 from distance_measuring.vision.pipeline import working_camera
 
 
@@ -421,6 +423,19 @@ def run(args):
     report["pairwise_matches"] = pairwise_records
     report["pairwise_usable_count"] = sum(t["usable_pairwise"] for t in pairwise_records)
     report["third_view_required"] = False
+    try:
+        report["overlap"] = require_connected_overlap(
+            args.image_indices,
+            [p["image_ids"] for p in pair_records if p["usable_pairwise_unique_count"] >= 8],
+            stage="pairwise correlation and geometry",
+        )
+    except DisconnectedOverlapError as error:
+        report["overlap"] = {
+            "connected": False,
+            "components": error.components,
+            "failure": str(error),
+        }
+        report["quality_status"] = "disconnected_overlap"
     review_artifacts(
         images, pairwise_records + records, output, report, not args.stored_orientation
     )
@@ -464,7 +479,10 @@ def run(args):
         f"{report['epipolar_consistent_track_count']}"
     )
     print(f"Review: {output / 'review.html'}")
-    return 0 if report["pairwise_usable_count"] else 1
+    if not report["overlap"]["connected"]:
+        print(report["overlap"]["failure"], file=sys.stderr)
+        return 1
+    return 0
 
 
 def main():

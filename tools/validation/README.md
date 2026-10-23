@@ -1,5 +1,11 @@
 # Capture geometry and matching diagnostics
 
+All selected photos must connect through verified pairwise overlaps. A chain is
+sufficient. An isolated photo or disconnected groups abort with the affected
+image IDs; compass/gyro data cannot supply the missing visual connection.
+Matching diagnostics are retained for review on failure, and the audit exits
+with a nonzero status. See [the overlap gate](../../docs/architecture/overlap_gate.md).
+
 ## Explain the ruler/acceleration size difference
 
 After the pairwise ruler retry, run:

@@ -9,6 +9,7 @@ import numpy as np
 from distance_measuring.camera import CameraExtrinsics, CameraIntrinsics
 from distance_measuring.visualization.cameras import plot_camera_frames
 
+from .overlap import require_connected_overlap
 from .pose import chain_camera, estimate_essential, recover_relative_pose
 
 
@@ -113,6 +114,7 @@ def estimate_poses(
     source, intrinsics, features, pairs = _load_matches(root)
     output.mkdir(parents=True, exist_ok=True)
     (output / "camera_frames.png").unlink(missing_ok=True)
+    (output / "poses.json").unlink(missing_ok=True)
     results, relative = [], {}
     for (i, j), (indices, m4_mask) in pairs.items():
         points1, points2 = features[i][indices[:, 0]], features[j][indices[:, 1]]
@@ -168,6 +170,11 @@ def estimate_poses(
                 "arrays_file": name,
             }
         )
+    overlap = require_connected_overlap(
+        source["selected_image_indices"],
+        [pair for pair, pose in relative.items() if pose.R is not None and pose.inliers.sum() >= 8],
+        stage="verified visual poses",
+    )
     a, b, c = source["selected_image_indices"]
     world = {a: CameraExtrinsics(np.eye(3), np.zeros(3))}
     for first, second in ((a, b), (b, c)):
@@ -213,6 +220,7 @@ def estimate_poses(
         quality = "pairwise_pose_checks_passed"
     report = {
         "schema_version": 1,
+        "overlap": overlap,
         "session_id": source["session_id"],
         "selected_image_indices": [a, b, c],
         "coordinate_convention": "world_to_camera_X_right_Y_down_Z_forward",

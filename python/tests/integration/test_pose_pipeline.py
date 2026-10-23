@@ -146,6 +146,28 @@ def test_failed_pair_preserves_diagnostics_and_removes_stale_plot(m4_export, tmp
     assert not (output / "camera_frames.png").exists()
 
 
+def test_isolated_image_aborts_without_publishing_a_partial_or_stale_pose_report(
+    m4_export, tmp_path
+):
+    root, source, _ = m4_export
+    for pair in source["pairs"]:
+        if 9 not in pair["indices"]:
+            continue
+        path = root / pair["matches_file"]
+        with np.load(path) as data:
+            indices = data["indices"]
+        np.savez_compressed(path, indices=indices, inliers=np.zeros(180, bool))
+        pair["inlier_count"] = 0
+    (root / "matches.json").write_text(json.dumps(source))
+    output = tmp_path / "isolated"
+    output.mkdir()
+    (output / "poses.json").write_text('{"success":true}')
+    result = run_poses(root, output)
+    assert result.returncode != 0
+    assert "Disconnected image overlap" in result.stderr and "[9]" in result.stderr
+    assert not (output / "poses.json").exists()
+
+
 def test_inconsistent_rotation_loop_is_explicitly_flagged(m4_export, tmp_path, monkeypatch):
     recover = pose_pipeline.recover_relative_pose
     calls = 0
