@@ -24,6 +24,7 @@ from distance_measuring.inertial.experimental import (
     integrate_interval,
     orientation_interpolator,
 )
+from distance_measuring.inertial.heading import prepare_visual_heading
 from distance_measuring.optimization.bundle import bundle_adjust, reprojection_residuals
 from distance_measuring.scene import load_scene, save_scene
 from distance_measuring.vision.pairwise_scene import rebuild_pairwise_scene
@@ -79,20 +80,38 @@ def checks(scene):
     return [ruler_check(scene, ids) for ids in [*combinations(range(3), 2), (0, 1, 2)]]
 
 
-def imu_experiment(session, scene, seed_measurement, *, orientation_source="rotation_vector"):
+def imu_experiment(
+    session,
+    scene,
+    seed_measurement,
+    *,
+    orientation_source="rotation_vector",
+    stationary_window=(0.1, 1.6),
+):
     streams = session.sensor_streams
     base = session.start_ns
     rotation = streams["rotation_vector"]
     acceleration = streams["accelerometer"]
     gyro = streams["gyroscope"]
-    if min(len(rotation), len(acceleration), len(gyro)) < 2:
-        raise ValueError("Retry needs accelerometer, rotation-vector and gyroscope streams")
-    rt = np.array([(s.timestamp_ns - base) / 1e9 for s in rotation])
-    sl = orientation_interpolator(rt, [[s.x, s.y, s.z, s.w] for s in rotation])
+    if min(len(acceleration), len(gyro)) < 2:
+        raise ValueError("Retry needs accelerometer and gyroscope streams")
+    rt, sl = None, None
+    if orientation_source != "visual_anchored_gyroscope":
+        if len(rotation) < 2:
+            raise ValueError("The legacy orientation comparison needs rotation-vector samples")
+        rt = np.array([(s.timestamp_ns - base) / 1e9 for s in rotation])
+        sl = orientation_interpolator(rt, [[s.x, s.y, s.z, s.w] for s in rotation])
     gt = np.array([(s.timestamp_ns - base) / 1e9 for s in gyro])
     gw = np.array([[s.x, s.y, s.z] for s in gyro])
     seed_time = None
-    if orientation_source == "gyroscope":
+    visual_heading = None
+    if orientation_source == "visual_anchored_gyroscope":
+        _, sl, visual_heading = prepare_visual_heading(
+            session, scene, stationary_window=stationary_window
+        )
+        rt = np.array(visual_heading["continuous_orientation_coverage_s"])
+        seed_time = float(rt[0])
+    elif orientation_source == "gyroscope":
         covered = (gt >= rt[0]) & (gt <= rt[-1])
         if covered.sum() < 2:
             raise ValueError("Need gyro samples inside rotation-vector coverage")
@@ -119,6 +138,12 @@ def imu_experiment(session, scene, seed_measurement, *, orientation_source="rota
         "early_median_gravity_plus_bias_proxy": proxy,
     }
     images = [next(e for e in session.images if e.index == i) for i in range(3)]
+    frame_times_available = all(
+        e.timestamp_source == "camera_frame"
+        and e.metadata.sensor_timestamp_clock_domain == "android_elapsed_realtime_ns"
+        and e.metadata.sensor_timestamp_ns == e.timestamp_ns
+        for e in images
+    )
     for e in images:
         if e.metadata.lens_facing != 1 or e.metadata.target_rotation != 0 or e.metadata.is_flipped:
             raise ValueError(
@@ -133,14 +158,25 @@ def imu_experiment(session, scene, seed_measurement, *, orientation_source="rota
     rotation_checks = []
     endpoint_checks = []
     naive_pairs = []
-    for name, fraction in [
-        ("button_request", 0.0),
-        ("request_callback_midpoint", 0.5),
-        ("callback", 1.0),
-    ]:
+    hypotheses = (
+        [("camera_frame", None)]
+        if frame_times_available
+        else [
+            ("button_request", 0.0),
+            ("request_callback_midpoint", 0.5),
+            ("callback", 1.0),
+        ]
+    )
+    for name, fraction in hypotheses:
         times = np.array(
             [
-                ((e.timestamp_ns - base) + fraction * (e.callback_timestamp_ns - e.timestamp_ns))
+                (e.timestamp_ns - base) / 1e9
+                if fraction is None
+                else (
+                    ((e.request_timestamp_ns or e.timestamp_ns) - base)
+                    + fraction
+                    * (e.callback_timestamp_ns - (e.request_timestamp_ns or e.timestamp_ns))
+                )
                 / 1e9
                 for e in images
             ]
@@ -232,6 +268,8 @@ def imu_experiment(session, scene, seed_measurement, *, orientation_source="rota
     return (
         {
             "orientation_source": orientation_source,
+            "visual_heading": visual_heading,
+            "rotation_comparison_independent": visual_heading is None,
             "gyro_seed_time_s": seed_time,
             "gyro_bias_assumed_rad_s": [0, 0, 0] if orientation_source == "gyroscope" else None,
             "camera_from_device_nominal": R_cd.tolist(),
@@ -240,19 +278,22 @@ def imu_experiment(session, scene, seed_measurement, *, orientation_source="rota
             "early_gravity_plus_bias_proxy_m_s2": proxy.tolist(),
             "early_window_stationarity_validated": False,
             "image_callback_latency_s": [
-                (e.callback_timestamp_ns - e.timestamp_ns) / 1e9 for e in images
+                (e.callback_timestamp_ns - (e.request_timestamp_ns or e.timestamp_ns)) / 1e9
+                for e in images
             ],
-            "image_button_times_s": [(e.timestamp_ns - base) / 1e9 for e in images],
-            "exposure_timestamps_available": all(
-                e.metadata.sensor_timestamp_ns is not None for e in images
-            ),
+            "image_button_times_s": [
+                ((e.request_timestamp_ns or e.timestamp_ns) - base) / 1e9 for e in images
+            ],
+            "exposure_timestamps_available": frame_times_available,
             "rotation_comparison": rotation_checks,
             "endpoint_diagnostics": endpoint_checks,
             "naive_pair_integrations": naive_pairs,
             "scale_trials": trials,
             "metric_scale_accepted": False,
             "limitations": [
-                "Photo times are button requests, not measured exposure times",
+                "Frame timestamps do not resolve rolling shutter/exposure-duration uncertainty"
+                if frame_times_available
+                else "Photo times are button requests, not measured exposure times",
                 "Accelerometer bias, initial velocity and camera/IMU lever arm are not calibrated",
                 "Three poses cannot jointly determine scale, initial velocity and constant bias",
             ]
@@ -302,6 +343,7 @@ def plots(report, at, world, output):
         "button_request": "Button press",
         "request_callback_midpoint": "Midpoint",
         "callback": "Callback",
+        "camera_frame": "Camera frame",
     }
     for trial, color in zip(
         [
@@ -310,14 +352,27 @@ def plots(report, at, world, output):
             if t["gravity_mode"] == "nominal_vertical_gravity"
         ],
         colors,
-        strict=True,
+        strict=False,
     ):
         values = trial["acceleration_only_scale_ruler_lengths_cm"]
         if values is not None:
             right.plot([0, 1, 2], values, "o-", color=color, label=timing_labels[trial["timing"]])
-    right.text(
-        0.03, 0.5, "Callback scale rejected: non-positive", transform=right.transAxes, fontsize=8
+    callback = next(
+        (
+            t
+            for t in report["imu"]["scale_trials"]
+            if t["timing"] == "callback" and t["gravity_mode"] == "nominal_vertical_gravity"
+        ),
+        None,
     )
+    if callback is not None and callback["acceleration_only_scale_ruler_lengths_cm"] is None:
+        right.text(
+            0.03,
+            0.5,
+            "Callback rejected: " + callback["fit"]["rejection_reason"],
+            transform=right.transAxes,
+            fontsize=8,
+        )
     right.axhspan(4.5, 5.5, color="#46ad73", alpha=0.15)
     right.axhline(5, color="#278f53", lw=1)
     right.set(
@@ -356,7 +411,7 @@ def plots(report, at, world, output):
     ]:
         trials = [t for t in report["imu"]["scale_trials"] if t["gravity_mode"] == mode]
         b.plot(
-            [0, 0.5, 1],
+            np.arange(len(trials)),
             [t["fit"]["raw_scale_solution_m_per_unit"] for t in trials],
             marker=marker,
             label="Nominal gravity"
@@ -367,8 +422,8 @@ def plots(report, at, world, output):
     b.axhline(reference, color="#278f53", ls="--", label="5 cm ruler reference (comparison only)")
     b.axhline(0, color="gray", lw=0.7)
     b.set(
-        xticks=[0, 0.5, 1],
-        xticklabels=["Button request", "Midpoint", "Callback"],
+        xticks=np.arange(len(trials)),
+        xticklabels=[timing_labels[t["timing"]] for t in trials],
         ylabel="Candidate scale (m / reconstruction unit)",
         title="Scale sensitivity to timing and gravity/bias assumptions",
     )
@@ -391,8 +446,16 @@ def main():
         "--old-scene", type=Path, default=root / "data/processed/measurement01/m7/scene.json"
     )
     parser.add_argument(
-        "--output", type=Path, default=root / "data/processed/measurement01/ruler_retry"
+        "--output",
+        type=Path,
+        default=root / "data/processed/measurement01/ruler_visual_heading_retry",
     )
+    parser.add_argument(
+        "--orientation-source",
+        choices=["visual_anchored_gyroscope", "gyroscope", "rotation_vector"],
+        default="visual_anchored_gyroscope",
+    )
+    parser.add_argument("--stationary-window", nargs=2, type=float, default=[0.1, 1.6])
     args = parser.parse_args()
     output = args.output.resolve()
     protected = [
@@ -438,7 +501,13 @@ def main():
     seed_check = next(r for r in new if r["image_ids"] == seed)
     if not seed_check["all_ticks_accepted"]:
         raise ValueError("Selected visual seed does not triangulate the independent ruler ticks")
-    imu, at, world = imu_experiment(session, refined.scene, seed_check)
+    imu, at, world = imu_experiment(
+        session,
+        refined.scene,
+        seed_check,
+        orientation_source=args.orientation_source,
+        stationary_window=args.stationary_window,
+    )
     report = {
         "schema_version": 1,
         "session_id": audit["session_id"],

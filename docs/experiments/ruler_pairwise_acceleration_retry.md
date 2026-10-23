@@ -17,10 +17,16 @@ rotation-vector experiment for comparison.
 From the repository root with the recorded session and matching-review artifacts:
 
 ```bash
-.venv/bin/python tools/validation/retry_ruler.py
+.venv/bin/python tools/validation/retry_ruler.py \
+  --orientation-source rotation_vector \
+  --output data/processed/measurement01/ruler_retry
 ```
 
 Outputs stay in ignored `data/processed/measurement01/ruler_retry/`:
+
+These flags retain this original experiment. The command's current default is
+the [visual-heading gyro path](../math/visual_heading.md), which writes to a
+separate `ruler_visual_heading_retry/` directory and keeps metric scale unaccepted.
 
 - `ruler_retry.json`: old/new checks, initialization, optimization, orientation
   comparison, acceleration/velocity/scale trials and source hashes.

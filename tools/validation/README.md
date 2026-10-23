@@ -182,11 +182,34 @@ change the failed M9 accuracy gate or apply a metric scale.
 This reads the pairwise matching audit, rebuilds poses using the strongest pair
 and PnP overlap, refines the scene, and repeats the unchanged held-out ruler check.
 It separately tries acceleration-derived scale with gravity and timing sensitivity
-tests. Outputs are in `data/processed/measurement01/ruler_retry/`:
+tests. The default uses gyro propagation with image heading constraints and one
+initial compass reference when valid raw compass/rest data exist. Outputs are in
+`data/processed/measurement01/ruler_visual_heading_retry/`:
 `scene.json`, `ruler_retry.json`, `ruler_comparison.png`,
 `acceleration_diagnostics.png` and the intermediate pairwise/scene/IMU artifacts.
 Existing inputs stay unchanged. A completed experiment does not imply accepted
 metric scale; inspect the report's quality flags.
+
+To reproduce the original fused-orientation comparison, explicitly pass
+`--orientation-source rotation_vector --output data/processed/measurement01/ruler_retry`.
+Ruler annotations in this script are specific to measurement01 and cannot be
+reused for a new capture without new annotations.
+
+For generic scene heading preparation, use:
+
+```bash
+.venv/bin/python python/scripts/prepare_heading.py data/raw/measurement01 \
+  --scene data/processed/measurement01/ruler_retry/scene.json \
+  --output data/processed/measurement01/visual_heading
+```
+
+Inspect `heading.json`, `heading.png` and `orientation.npz`. The exported scene
+retains all visual relative camera rotations. Continuous gyro heading is anchored
+to image headings while preserving its gravity direction. Compass data provide
+one global reference, and later compass updates cannot move the photo headings.
+See [equations, quality checks and capture requirements](../../docs/math/visual_heading.md).
+The old recording lacks raw compass data and a valid starting rest window;
+a new app-0.2 capture is needed to validate those parts.
 
 The ruler-reference geometry now passes. Independent acceleration scale remains
 unreliable and is not applied to the exported scene. See

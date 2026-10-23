@@ -775,6 +775,14 @@ Create an experiment note containing absolute and relative measurement errors.
 
 # M11 — IMU preprocessing
 
+The experimental [visual-heading path](docs/math/visual_heading.md) now retains
+compass/game-vector data, records camera frame timestamps when their clock is
+comparable, estimates gyro offset from a checked declared rest window, and anchors
+gyro heading to images while preserving gyro tilt. Compass sets only one world
+reference. Disconnected image overlaps abort. The old recording lacks raw compass
+data and a valid starting rest window; physical validation and full accelerometer
+bias calibration remain outstanding. This does not complete M11/M12 or accept scale.
+
 ## T11.1 Load IMU streams
 
 [ ] Split `sensors.csv` into typed streams.

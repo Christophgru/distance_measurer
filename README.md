@@ -122,6 +122,13 @@ point-by-point review page. Three-view cycles are optional. See the
 [matching review guide](tools/validation/README.md) and
 [measurement01 matching results](docs/experiments/measurement01_matching_review.md).
 
+Selected images must form a [connected overlap graph](docs/architecture/overlap_gate.md).
+An isolated image or disconnected group aborts reconstruction with the image IDs.
+Compass data set one global heading; image matches determine relative photo
+orientations, with gyro motion between them. See the
+[heading workflow](docs/math/visual_heading.md) for the command, plots and the
+updated capture app. Absolute metric scale remains unaccepted.
+
 ---
 
 ## Why this project exists
