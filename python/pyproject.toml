@@ -17,10 +17,13 @@ dependencies = [
     "open3d",
     "matplotlib",
     "pytest",
+    "pymongo>=4.15,<5",
 ]
 
 [project.optional-dependencies]
 dev = ["ruff"]
+sfm = ["pycolmap==4.0.3"]
+sfm-cuda12 = ["pycolmap-cuda12==4.0.3; platform_system == 'Linux'"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

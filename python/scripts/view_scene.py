@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from distance_measuring.scene import Scene
+from distance_measuring.scene.storage import decode_document
 from distance_measuring.visualization.scene_view import (
     SELECTION_NAMES,
     build_scene_view,
@@ -43,7 +44,7 @@ def main(argv: list[str] | None = None) -> int:
                 "Viewer outputs must be outside data/raw and the input scene directory"
             )
         content = source.read_bytes()
-        scene = Scene.from_dict(json.loads(content))
+        scene = Scene.from_dict(decode_document(content, source.suffix))
         view = build_scene_view(scene, tuple(args.point_ids), frustum_depth=args.frustum_depth)
         selection = (
             selection_report(scene, tuple(args.point_ids), hashlib.sha256(content).hexdigest())

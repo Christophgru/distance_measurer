@@ -15,6 +15,7 @@ import numpy as np
 from distance_measuring.camera import resolve_intrinsics
 from distance_measuring.dataset import load_session
 from distance_measuring.scene import Scene
+from distance_measuring.scene.storage import decode_document
 from distance_measuring.vision.pipeline import working_camera
 
 from .scene_view import build_scene_view
@@ -143,7 +144,7 @@ def export_browser_scene(source, output, *, session_path=None, calibration_path=
     if output.suffix.lower() != ".html":
         raise ValueError("Browser output must be an .html file")
     content = source.read_bytes()
-    scene = Scene.from_dict(json.loads(content))
+    scene = Scene.from_dict(decode_document(content, source.suffix))
     hashes = {str(source): hashlib.sha256(content).hexdigest()}
     photos = {}
     if session_path is not None:

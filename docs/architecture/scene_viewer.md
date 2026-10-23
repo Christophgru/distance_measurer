@@ -1,5 +1,20 @@
 # M8 desktop viewer and point selection
 
+## Large point-list files
+
+Scene documents keep their existing schema. `save_scene()` writes JSON through
+100,000 points and BSON above that boundary, returning the actual output path
+(`scene.bson` when given `scene.json` for a larger scene). Both `load_scene()`
+and the viewer/export commands accept either format. BSON uses PyMongo's
+standalone codec; no MongoDB server is required. Integer timestamps retain
+their full 64-bit precision.
+
+Large fused clouds use bounded BSON point-list batches with a small JSON
+manifest. Each record retains its ID, position, color, normal and supporting
+image IDs. `.bson` files are authoritative; matching `.bson.gz` files reduce
+browser transfer size. The browser decodes batches in a worker and renders
+typed GPU buffers. Those multi-file viewers need a local HTTP server.
+
 ## Interactive browser viewer
 
 For smooth GPU inspection without a desktop graphics window or Matplotlib,

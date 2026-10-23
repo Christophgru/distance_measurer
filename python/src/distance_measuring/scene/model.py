@@ -215,11 +215,12 @@ class Scene:
 
 
 def save_scene(path: str | Path, scene: Scene) -> Path:
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(scene.to_dict(), indent=2, allow_nan=False) + "\n")
-    return path
+    from .storage import write_document
+
+    return write_document(path, scene.to_dict(), point_count=len(scene.points))
 
 
 def load_scene(path: str | Path) -> Scene:
-    return Scene.from_dict(json.loads(Path(path).read_text()))
+    from .storage import read_document
+
+    return Scene.from_dict(read_document(path))
