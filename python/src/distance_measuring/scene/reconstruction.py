@@ -267,9 +267,10 @@ def reconstruct_scene(
         "warnings": warnings,
     }
     output.mkdir(parents=True, exist_ok=True)
-    save_scene(output / "scene.json", scene)
+    scene_path = save_scene(output / "scene.json", scene)
     report = {
         "schema_version": 1,
+        "output_scene": str(scene_path),
         "summary": summary,
         "tracks": diagnostics,
         "conflicts": [asdict(conflict) for conflict in built.conflicts],

@@ -86,11 +86,13 @@ def main(argv=None):
         if any(hashlib.sha256(Path(p).read_bytes()).hexdigest() != h for p, h in hashes.items()):
             raise ValueError("A densification input changed")
         output.mkdir(parents=True, exist_ok=True)
-        save_scene(output / "scene.json", dense)
+        scene_path = save_scene(output / "scene.json", dense)
+        report["output_scene"] = str(scene_path)
         (output / "densification.json").write_text(
             json.dumps(report, indent=2, allow_nan=False) + "\n"
         )
         print("Total real reconstructed points:", len(dense.points), flush=True)
+        print("Scene:", scene_path, flush=True)
         return 0
     except (ValueError, OSError) as error:
         print(f"Cannot densify scene: {error}", file=sys.stderr)

@@ -255,7 +255,9 @@ def main():
         parser.error("Output must be outside raw and source artifact directories")
     sources = [args.scene.resolve(), args.poses.resolve(), matches / "matches.json"]
     content = args.scene.read_bytes()
-    scene = Scene.from_dict(json.loads(content))
+    from distance_measuring.scene.storage import decode_document
+
+    scene = Scene.from_dict(decode_document(content, args.scene.suffix))
     report = json.loads((matches / "matches.json").read_text())
     initial = json.loads(args.poses.read_text())
     if (

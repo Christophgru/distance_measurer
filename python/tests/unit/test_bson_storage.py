@@ -28,3 +28,10 @@ def test_same_scene_schema_roundtrips_in_json_and_bson(tmp_path, bundle_scene_fa
     bson_path = save_scene(tmp_path / "scene.bson", scene)
     assert load_scene(json_path).to_dict() == load_scene(bson_path).to_dict() == scene.to_dict()
     assert json.loads(json_path.read_text()) == read_document(bson_path)
+
+
+def test_invalid_bson_has_actionable_input_error(tmp_path):
+    source = tmp_path / "scene.bson"
+    source.write_bytes(b"truncated")
+    with pytest.raises(ValueError, match="Malformed BSON"):
+        load_scene(source)

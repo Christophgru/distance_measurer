@@ -31,8 +31,11 @@ def run_refinement(source, output, *options):
     )
 
 
-def test_cli_exports_refined_scene_metrics_and_input_hash(bundle_scene_factory, tmp_path):
+@pytest.mark.parametrize("suffix", [".json", ".bson"])
+def test_cli_exports_refined_scene_metrics_and_input_hash(bundle_scene_factory, tmp_path, suffix):
     source, initial = write_input(tmp_path, bundle_scene_factory)
+    if suffix == ".bson":
+        source = save_scene(source.with_suffix(suffix), initial)
     before = source.read_bytes()
     output = tmp_path / "m7"
     result = run_refinement(source, output)

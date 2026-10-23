@@ -10,6 +10,7 @@ def decode_document(content, suffix):
     if suffix.lower() == ".bson":
         from bson import BSON, Int64
         from bson.codec_options import CodecOptions, TypeDecoder, TypeRegistry
+        from bson.errors import InvalidBSON
 
         class IntegerDecoder(TypeDecoder):
             bson_type = Int64
@@ -17,9 +18,12 @@ def decode_document(content, suffix):
             def transform_bson(self, value):
                 return int(value)
 
-        return BSON(content).decode(
-            codec_options=CodecOptions(type_registry=TypeRegistry([IntegerDecoder()]))
-        )
+        try:
+            return BSON(content).decode(
+                codec_options=CodecOptions(type_registry=TypeRegistry([IntegerDecoder()]))
+            )
+        except InvalidBSON as error:
+            raise ValueError(f"Malformed BSON document: {error}") from error
     return json.loads(content)
 
 
@@ -28,10 +32,16 @@ def read_document(path):
     return decode_document(path.read_bytes(), path.suffix)
 
 
+def point_list_path(path, point_count):
+    path = Path(path)
+    return path.with_suffix(".bson") if point_count > JSON_POINT_LIMIT else path
+
+
 def write_document(path, document, *, point_count=None):
     """Return actual path; point lists over 100k always use a .bson suffix."""
     path = Path(path)
     count = len(document.get("points", [])) if point_count is None else point_count
+    path = point_list_path(path, count)
     if count > JSON_POINT_LIMIT or path.suffix.lower() == ".bson":
         from bson import BSON
 

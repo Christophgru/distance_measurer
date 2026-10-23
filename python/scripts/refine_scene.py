@@ -46,7 +46,7 @@ def main(argv: list[str] | None = None) -> int:
         "Scale: arbitrary visual units; input calibration and geometry warnings "
         "remain in scene metadata"
     )
-    print(f"Scene: {args.output / 'scene.json'}")
+    print(f"Scene: {report['output_scene']}")
     return 0 if report["accepted"] and report["converged"] else 1
 
 

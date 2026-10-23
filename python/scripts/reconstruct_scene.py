@@ -41,7 +41,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Reprojection RMSE: {summary['reprojection_rmse_px']} working pixels")
     for warning in summary["warnings"]:
         print(f"Warning: {warning}")
-    print(f"Scene: {args.output / 'scene.json'}")
+    print(f"Scene: {report['output_scene']}")
     return 0 if summary["success"] else 1
 
 

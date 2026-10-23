@@ -53,7 +53,9 @@ def main() -> int:
     )
     args = parser.parse_args()
     content = args.scene.read_bytes()
-    scene = Scene.from_dict(json.loads(content))
+    from distance_measuring.scene.storage import decode_document
+
+    scene = Scene.from_dict(decode_document(content, args.scene.suffix))
     cameras = {camera.image_id: camera for camera in scene.cameras}
     if not all(i in cameras for i in range(3)):
         parser.error("This experiment requires measurement01 cameras 0, 1 and 2")

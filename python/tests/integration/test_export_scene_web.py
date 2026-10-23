@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from distance_measuring.camera import CameraExtrinsics, resolve_intrinsics
 from distance_measuring.dataset import load_session
@@ -21,8 +22,9 @@ from distance_measuring.scene import (
 SCRIPT = Path(__file__).resolve().parents[3] / "python/scripts/export_scene_web.py"
 
 
+@pytest.mark.parametrize("suffix", [".json", ".bson"])
 def test_cli_exports_matching_photos_colors_and_source_hashes_without_changing_inputs(
-    capture, tmp_path
+    capture, tmp_path, suffix
 ):
     session = load_session(capture.path)
     cameras = tuple(
@@ -60,7 +62,7 @@ def test_cli_exports_matching_photos_colors_and_source_hashes_without_changing_i
             "scale_status": "arbitrary_visual_scale_unverified",
         },
     )
-    source = tmp_path / "scene/scene.json"
+    source = tmp_path / "scene" / ("scene" + suffix)
     save_scene(source, scene)
     inputs = [source, *[p for p in capture.path.rglob("*") if p.is_file()]]
     hashes = {p: hashlib.sha256(p.read_bytes()).hexdigest() for p in inputs}
