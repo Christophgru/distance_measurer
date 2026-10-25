@@ -9,7 +9,10 @@ import java.io.File
 
 object PhotoMetadata {
     /** Preserve the JPEG's own frame timestamp; never associate a preview callback by proximity. */
-    fun saveCapturedJpeg(file: File, image: ImageProxy, camera: JSONObject, targetRotation: Int): JSONObject {
+    fun saveCapturedJpeg(
+        file: File, image: ImageProxy, camera: JSONObject, targetRotation: Int,
+        frameMetadata: JSONObject? = null,
+    ): JSONObject {
         check(image.format == ImageFormat.JPEG) { "Expected a JPEG camera buffer" }
         val buffer = image.planes[0].buffer.duplicate()
         buffer.rewind()
@@ -28,11 +31,20 @@ object PhotoMetadata {
         }
         exif.setAttribute(ExifInterface.TAG_ORIENTATION, orientation.toString())
         exif.saveAttributes()
-        return read(file, camera, targetRotation)
+        val metadata = read(file, camera, targetRotation)
             .put("sensor_timestamp_ns", image.imageInfo.timestamp.takeIf { it > 0 } ?: JSONObject.NULL)
             .put("sensor_timestamp_clock_domain", camera.optString("sensor_timestamp_clock_domain", "camera_unknown"))
             .put("sensor_timestamp_source", "camerax_image_info")
             .put("metadata_source", "jpeg_exif_camera_characteristics_and_image_info")
+            .put("capture_result_source", "unavailable")
+        frameMetadata?.keys()?.forEach { name ->
+            // A single-camera ID from characteristics remains valid if this
+            // device does not expose the logical-multicamera result key.
+            if (name != "physical_camera_id" || !frameMetadata.isNull(name)) {
+                metadata.put(name, frameMetadata.get(name))
+            }
+        }
+        return metadata
     }
 
     fun read(file: File, camera: JSONObject, targetRotation: Int): JSONObject {

@@ -123,14 +123,26 @@ Dimensions describe the stored JPEG before EXIF orientation. Consumers must
 handle EXIF rotation/flipping consistently when using pixel coordinates.
 `target_rotation` is the Android Surface rotation enum, not degrees. The camera
 ID is CameraX's selected logical camera ID; a logical camera may select different
-physical lenses internally. Lens facing and native sensor orientation come from
-Camera2 characteristics. Physical lens identity is not claimed.
+physical lenses internally. App 0.3 also records `physical_camera_id` from the
+matched physical/active-camera result when available, or the ID of a known
+single-camera device. Requested pinning is reported separately from observations.
+Lens facing, sensor size and native orientation come from the chosen sensor's
+Camera2 characteristics.
 
 EXIF fields are null when missing, rather than invented defaults. Physical sensor
 size is a characteristic of the logical camera, not a calibrated active crop;
 these values alone cannot guarantee accurate intrinsics. CameraX requests JPEG
 quality 100 and its highest supported capture resolution for the chosen stream
 configuration. Actual dimensions depend on the device and are recorded per image.
+
+App 0.3 adds optional `focus_distance_diopters`, `zoom_ratio`, `crop_region`,
+`ae_mode`, `ae_state`, `ae_lock`, `awb_mode`, `awb_state`, `awb_lock`, `af_mode`,
+`af_state`, `lens_state`, `capture_result_source` and `capture_stability` fields.
+An exact sensor-timestamp result match may supply the existing focal-length,
+exposure and ISO fields in preference to EXIF. A missing result leaves those
+EXIF values intact and the new settings unavailable. Schema version remains 1;
+old recordings need no migration. See [capture stability](capture_stability.md)
+for field units, timestamp association, mode behavior and inspection commands.
 
 `image_request` records accepted button requests; `image_error` records failures.
 `timeline_start` and `timeline_end` delimit the timeline. During end, new requests

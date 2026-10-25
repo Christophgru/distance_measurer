@@ -6,9 +6,12 @@ vector. App 0.2 retains all available streams without fusing them during capture
 Requires Android 8.0+
 (API 26). Capture runs while the Activity is in the foreground.
 
-App 0.2 builds with `assembleDebug`; its **17 JVM tests** and `lintDebug` pass.
-Compass availability, JPEG metadata/orientation and REALTIME frame timestamps
-still require the physical-device checks below.
+App 0.3 adds observed per-image Camera2 geometry metadata and a default capture
+stability mode. It requests a fixed lens/zoom and holds focus/crop after
+convergence where supported, with automatic fallback. See
+[behavior and inspection](../docs/architecture/capture_stability.md). Hardware
+capture and vendor lock behavior still require the physical-device checks below.
+The debug APK builds; **30 JVM tests** and `lintDebug` pass.
 
 ## Build and install
 
@@ -39,7 +42,8 @@ Gradle and Maven dependencies. No Android Studio project generation is required.
    **Distance capture** and grant camera access. An accelerometer and gyroscope
    must be present; missing rotation-vector support is allowed.
 2. Tap **Start timeline** and hold the phone completely still for at least two
-   seconds. Then take overlapping pictures while slowly translating the phone
+   seconds to allow camera convergence and stability controls. Then take
+   overlapping pictures while slowly translating the phone
    around a textured, stationary scene. Every selected photo must connect to the
    others through overlaps; disconnected reconstruction aborts.
 3. Wait for each image counter increment before taking the next picture. Capture
@@ -113,6 +117,11 @@ PY
 
 The detailed data contract and clock definitions are in
 [capture_format.md](../docs/architecture/capture_format.md).
+
+Print per-image settings and observed lens/focal/focus/crop stability with
+`python python/scripts/inspect_session.py data/raw/<session_id>` (add `--json`
+for machine-readable output). Unknown/missing values do not establish stability;
+check actual values as well as `capture_stability.phase_at_request`.
 
 ## Physical-device acceptance checklist
 

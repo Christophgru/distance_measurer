@@ -97,3 +97,27 @@ def test_cli_invalid_gap_threshold(capture):
     result = run_inspector(capture.path, "--max-sensor-gap-s", "nan")
     assert result.returncode == 2
     assert "positive finite" in result.stderr
+
+
+def test_inspector_prints_each_images_settings_and_warns_on_lens_change(capture):
+    for image in capture.events:
+        if image["type"] == "image":
+            image["metadata"].update(
+                physical_camera_id="wide",
+                focus_distance_diopters=0,
+                crop_region=[0, 0, 80, 48],
+                ae_mode=1,
+                ae_lock=False,
+                af_state=4,
+            )
+    capture.events[4]["metadata"]["physical_camera_id"] = "tele"
+    capture.write()
+    result = run_inspector(capture.path)
+    assert result.returncode == 0, result.stderr
+    assert "physical_camera_id: tele" in result.stdout
+    assert "focus_distance_diopters: 0.0" in result.stdout
+    assert "lens=changed" in result.stdout
+    assert "camera_settings_changed" in result.stdout
+    summary = json.loads(run_inspector(capture.path, "--json").stdout)
+    assert len(summary["capture_geometry"]["images"]) == 3
+    assert summary["capture_geometry"]["stability"]["lens"] == "changed"

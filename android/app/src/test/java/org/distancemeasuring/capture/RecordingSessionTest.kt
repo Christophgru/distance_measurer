@@ -81,6 +81,27 @@ class RecordingSessionTest {
         return ticket
     }
 
+    @Test fun imageEventsRetainObservedGeometryAndRequestedStabilitySeparately() {
+        val recording = session()
+        now += 1_000_000
+        val ticket = checkNotNull(recording.beginPhoto(now))
+        ticket.temporaryFile.writeBytes(byteArrayOf(1, 2, 3))
+        now += 1_000_000
+        recording.completePhoto(ticket, now, JSONObject()
+            .put("physical_camera_id", "wide").put("focus_distance_diopters", 0.0)
+            .put("crop_region", org.json.JSONArray(listOf(0, 0, 4000, 3000)))
+            .put("ae_lock", false).put("af_state", 0)
+            .put("capture_result_source", "exact_sensor_timestamp")
+            .put("capture_stability", JSONObject().put("phase_at_request", "automatic_fallback")))
+        finish(recording)
+        val observed = events(recording).single { it.getString("type") == "image" }.getJSONObject("metadata")
+        assertEquals("wide", observed.getString("physical_camera_id"))
+        assertEquals(0.0, observed.getDouble("focus_distance_diopters"), 0.0)
+        assertEquals(4000, observed.getJSONArray("crop_region").getInt(2))
+        assertFalse(observed.getBoolean("ae_lock"))
+        assertEquals("automatic_fallback", observed.getJSONObject("capture_stability").getString("phase_at_request"))
+    }
+
     @Test fun createsIndependentSessionDirectories() {
         val first = session("first")
         finish(first)

@@ -4,12 +4,14 @@ from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
+from .capture_geometry import summarize_capture_geometry
 from .schema import Session
 from .validation import ValidationReport
 
 
 def summarize_session(session: Session, report: ValidationReport) -> dict[str, Any]:
     """Return JSON-serializable diagnostics, retaining integer nanosecond timestamps."""
+    geometry = summarize_capture_geometry(session)
     sensors = {}
     for name, stream in session.sensor_streams.items():
         timestamps = sorted(sample.timestamp_ns for sample in stream)
@@ -57,9 +59,11 @@ def summarize_session(session: Session, report: ValidationReport) -> dict[str, A
         "dropped_sensor_samples": session.metadata.dropped_sensor_samples,
         "sensors": sensors,
         "images": images,
+        "capture_geometry": geometry,
         "valid": report.ok,
         "errors": [{"code": issue.code, "message": issue.message} for issue in report.errors],
-        "warnings": [{"code": issue.code, "message": issue.message} for issue in report.warnings],
+        "warnings": [{"code": issue.code, "message": issue.message} for issue in report.warnings]
+        + geometry["warnings"],
     }
 
 
@@ -103,6 +107,16 @@ def format_summary(summary: dict[str, Any]) -> str:
             f"size={image['width']}x{image['height']}, "
             f"rotation={image['rotation_degrees']}"
         )
+    geometry = summary["capture_geometry"]
+    lines.extend(["", "Capture geometry (None = unavailable; modes/states are Camera2 enums):"])
+    for image in geometry["images"]:
+        lines.append(f"  Image {image['index']}:")
+        lines.extend(f"    {name}: {value}" for name, value in image["settings"].items())
+        lines.append(f"    capture_stability: {image['capture_stability']}")
+    lines.append(
+        "Observed stability: "
+        + ", ".join(f"{name}={status}" for name, status in geometry["stability"].items())
+    )
     for label, key in (("Errors", "errors"), ("Warnings", "warnings")):
         if summary[key]:
             lines.extend(["", f"{label}:"])

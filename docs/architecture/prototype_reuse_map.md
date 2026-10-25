@@ -33,9 +33,9 @@ Android files are under
 
 | Capability | Existing callable interface | Contract / remaining gap |
 | --- | --- | --- |
-| [R] Sensor acquisition | `CaptureRecorder.kt`: `start()`, `onSensorChanged(event)`, `takePhoto(imageCapture, cameraMetadata, targetRotation)`, `end(reason)` | Accelerometer, gyro, rotation vector, game rotation vector and magnetometer; serial recording while still images are captured. |
+| [R] Sensor acquisition | `CaptureRecorder.kt`: `start()`, `onSensorChanged(event)`, `takePhoto(imageCapture, cameraMetadata, targetRotation, geometry)`, `end(reason)` | Accelerometer, gyro, rotation vector, game rotation vector and magnetometer; serial recording while still images are captured. |
 | [R] Session / timestamps | `RecordingSession.kt`: `recordSensor(sample)`, `beginPhoto(requestNs)`, `completePhoto(ticket, callbackNs, imageMetadata)`, `requestEnd(reason)`, `finish()` | Writes ordered sensor rows and lifecycle/image events. Selects frame time only for a compatible elapsed-realtime domain, otherwise records request time explicitly. |
-| [R] JPEG metadata | `PhotoMetadata.kt`: `saveCapturedJpeg(file, image, camera, targetRotation)`, `read(file, camera, targetRotation)` | Dimensions, EXIF orientation/flip, focal lengths, exposure, ISO, ImageProxy frame timestamp/source. `MainActivity.kt` private `bindCamera()` supplies Camera2 ID, lens facing, sensor orientation/size and timestamp domain. Focus/crop/3A state is not recorded yet. |
+| [R] JPEG metadata | `PhotoMetadata.kt`: `saveCapturedJpeg(file, image, camera, targetRotation, frameMetadata=null)`, `read(file, camera, targetRotation)` | Dimensions, EXIF orientation/flip, focal lengths, exposure, ISO, ImageProxy frame timestamp/source. P1 adds `CaptureGeometry` + `FrameMetadataStore` for exact timestamp association of focus/crop/3A/physical-lens results; `MainActivity.kt` supplies sensor characteristics. |
 
 ## Existing runnable paths and checks
 
@@ -57,11 +57,11 @@ In particular inspect `test_inertial_experiment.py`, `test_pairwise_scene.py`,
 `test_relative_pose.py`, `test_triangulation.py` and `test_bundle_adjustment.py`
 before expanding those capabilities.
 
-## Missing adaptations required by P1–P6
+## Status and remaining adaptations for P1–P6
 
 | Tasks | Work still needed; reuse boundary |
 | --- | --- |
-| P1.1–P1.2 | Record focus distance, zoom/crop, physical lens identity where available, 3A modes/locks and stability diagnostics; add capture stability control. Existing typed `ImageMetadata` retains unknown fields in `.raw` but does not expose these settings yet. CameraX/Camera2 and ExifInterface are already dependencies; no Android CV dependency is present or needed for P1. |
+| P1.1–P1.2 | Implemented after this inventory: typed geometry fields, existing session inspector extended with change/stability diagnostics, exact-frame Camera2 metadata and `CaptureStability`/`CaptureStabilityPolicy` controls. No new dependency. See [P1 behavior and pending hardware validation](capture_stability.md). |
 | P2.1–P2.4 | No grid-quota tracking seeds, pyramidal LK, forward/backward rejection, age/error observation fields or selective replenishment found. Reuse `Features.response`, image loading and track IDs; use existing OpenCV for detection/flow. Descriptor tracks are not persistent temporal tracking state. |
 | P3.1–P3.4 | Expose per-image-pair gyro sample windows/counts and relative rotations using the existing integrator. Extend mounting tests to image-motion signs for yaw/pitch/roll; add rotation-only pixel prediction and residual parallax, spatial coverage and track ranking. Existing mounting math and tests are a starting point, not completion of P3. |
 | P4.1–P4.3 | Add earliest temporally qualified bootstrap selection with configurable coverage/parallax/track thresholds. Existing pairwise seeds rank visual support/conditioning; they do not use gyro-compensated temporal tracks. Feed selected tracks to existing E/pose/triangulation and expose counts/timing/quality. |

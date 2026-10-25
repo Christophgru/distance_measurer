@@ -52,7 +52,7 @@ class CaptureRecorder(context: Context, private val onState: (RecordingState) ->
         }, "sessions")
         val recording = RecordingSession(root, JSONObject()
             .put("manufacturer", Build.MANUFACTURER).put("model", Build.MODEL)
-            .put("android_api", Build.VERSION.SDK_INT).put("app_version", "0.2.0"),
+            .put("android_api", Build.VERSION.SDK_INT).put("app_version", "0.3.0"),
             sensors.mapValues { it.value != null }, SystemClock::elapsedRealtimeNanos)
         session = recording
         sensors.forEach { (name, sensor) ->
@@ -66,7 +66,10 @@ class CaptureRecorder(context: Context, private val onState: (RecordingState) ->
         publish()
     }
 
-    fun takePhoto(imageCapture: ImageCapture, cameraMetadata: JSONObject, targetRotation: Int) {
+    fun takePhoto(
+        imageCapture: ImageCapture, cameraMetadata: JSONObject, targetRotation: Int,
+        geometry: CaptureGeometry,
+    ) {
         // Sample the button timestamp on the UI thread, before scheduling storage work.
         val requestNs = SystemClock.elapsedRealtimeNanos()
         dispatch {
@@ -104,25 +107,32 @@ class CaptureRecorder(context: Context, private val onState: (RecordingState) ->
                             override fun onCaptureSuccess(image: ImageProxy) {
                                 val callbackNs = SystemClock.elapsedRealtimeNanos()
                                 handler.removeCallbacks(timeout)
-                                try {
-                                    guarded {
-                                        if (recording.closed || session !== recording) {
-                                            ticket.temporaryFile.delete()
-                                            return@guarded
+                                val saveImage = Runnable {
+                                    try {
+                                        guarded {
+                                            if (recording.closed || session !== recording) {
+                                                ticket.temporaryFile.delete()
+                                                return@guarded
+                                            }
+                                            try {
+                                                val metadata = PhotoMetadata.saveCapturedJpeg(
+                                                    ticket.temporaryFile, image, cameraMetadata, targetRotation,
+                                                    geometry.frames.take(image.imageInfo.timestamp))
+                                                recording.completePhoto(ticket, callbackNs, metadata)
+                                                if (!finishIfReady()) publish()
+                                            } catch (error: Exception) {
+                                                recording.failPhoto(ticket, error.message ?: "Invalid JPEG")
+                                                if (!finishIfReady()) publish("Photo failed: ${error.message}")
+                                            }
                                         }
-                                        try {
-                                            val metadata = PhotoMetadata.saveCapturedJpeg(
-                                                ticket.temporaryFile, image, cameraMetadata, targetRotation)
-                                            recording.completePhoto(ticket, callbackNs, metadata)
-                                            if (!finishIfReady()) publish()
-                                        } catch (error: Exception) {
-                                            recording.failPhoto(ticket, error.message ?: "Invalid JPEG")
-                                            if (!finishIfReady()) publish("Photo failed: ${error.message}")
-                                        }
+                                    } finally {
+                                        image.close()
                                     }
-                                } finally {
-                                    image.close()
                                 }
+                                // Camera2 and ImageProxy callbacks may arrive in either
+                                // order. Yield the sensor worker for a bounded join wait.
+                                if (geometry.frames.contains(image.imageInfo.timestamp)) saveImage.run()
+                                else if (!handler.postDelayed(saveImage, 500)) saveImage.run()
                             }
 
                             override fun onError(error: ImageCaptureException) {

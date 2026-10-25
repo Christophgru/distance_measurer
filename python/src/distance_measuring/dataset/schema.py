@@ -172,6 +172,20 @@ class ImageMetadata:
     sensor_timestamp_ns: int | None = None
     sensor_timestamp_clock_domain: str | None = None
     metadata_source: str | None = None
+    physical_camera_id: str | None = None
+    focus_distance_diopters: float | None = None
+    zoom_ratio: float | None = None
+    crop_region: tuple[int, int, int, int] | None = None
+    ae_mode: int | None = None
+    ae_state: int | None = None
+    ae_lock: bool | None = None
+    awb_mode: int | None = None
+    awb_state: int | None = None
+    awb_lock: bool | None = None
+    af_mode: int | None = None
+    af_state: int | None = None
+    lens_state: int | None = None
+    capture_result_source: str | None = None
     raw: dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
 
     @classmethod
@@ -190,10 +204,43 @@ class ImageMetadata:
             "iso",
             "sensor_width_mm",
             "sensor_height_mm",
+            "zoom_ratio",
         ):
             if data.get(name) is not None:
                 kwargs[name] = _number(data[name], f"{location}.{name}", positive=True)
-        for name in ("camera_id", "sensor_timestamp_clock_domain", "metadata_source"):
+        if data.get("focus_distance_diopters") is not None:
+            focus = _number(data["focus_distance_diopters"], f"{location}.focus_distance_diopters")
+            if focus < 0:
+                raise DatasetFormatError(f"{location}.focus_distance_diopters: expected >= 0")
+            kwargs["focus_distance_diopters"] = focus
+        if data.get("crop_region") is not None:
+            crop = data["crop_region"]
+            if not isinstance(crop, (list, tuple)) or len(crop) != 4:
+                raise DatasetFormatError(
+                    f"{location}.crop_region: expected [left, top, right, bottom]"
+                )
+            crop = tuple(_integer(v, f"{location}.crop_region") for v in crop)
+            if crop[2] <= crop[0] or crop[3] <= crop[1]:
+                raise DatasetFormatError(f"{location}.crop_region: expected a nonempty rectangle")
+            kwargs["crop_region"] = crop
+        for name in (
+            "ae_mode",
+            "ae_state",
+            "awb_mode",
+            "awb_state",
+            "af_mode",
+            "af_state",
+            "lens_state",
+        ):
+            if data.get(name) is not None:
+                kwargs[name] = _integer(data[name], f"{location}.{name}")
+        for name in (
+            "camera_id",
+            "physical_camera_id",
+            "sensor_timestamp_clock_domain",
+            "metadata_source",
+            "capture_result_source",
+        ):
             if data.get(name) is not None:
                 kwargs[name] = _text(data[name], f"{location}.{name}")
         for name, allowed in (
@@ -208,10 +255,11 @@ class ImageMetadata:
                 if value not in allowed:
                     raise DatasetFormatError(f"{location}.{name}: unsupported value {value}")
                 kwargs[name] = value
-        if data.get("is_flipped") is not None:
-            if type(data["is_flipped"]) is not bool:
-                raise DatasetFormatError(f"{location}.is_flipped: expected a boolean")
-            kwargs["is_flipped"] = data["is_flipped"]
+        for name in ("is_flipped", "ae_lock", "awb_lock"):
+            if data.get(name) is not None:
+                if type(data[name]) is not bool:
+                    raise DatasetFormatError(f"{location}.{name}: expected a boolean")
+                kwargs[name] = data[name]
         return cls(**kwargs, raw=dict(data))
 
 

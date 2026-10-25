@@ -43,6 +43,11 @@ Validation fully decodes every referenced image and checks its stored dimensions
 before EXIF rotation. It accepts any number of images and keeps the folder name
 independent of the recorded session ID.
 
+Inspection also prints each image's geometry settings and warns when they change.
+JSON includes `capture_geometry` with observed lens, focal-length, focus and crop
+stability; older captures report unknown where metadata was not recorded. See
+[capture stability](../docs/architecture/capture_stability.md) for fields and controls.
+
 ```python
 from distance_measuring.dataset import load_session, validate_session
 

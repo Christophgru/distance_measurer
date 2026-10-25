@@ -98,7 +98,11 @@ Goal: reduce unnecessary variation before improving matching.
 
 ## P1.1 Record the camera settings that affect geometry
 
-[ ] Inspect the existing Android capture path and ensure every image records, where available:
+[x] Inspect the existing Android capture path and ensure every image records, where available:
+
+Implemented in app 0.3 with exact-timestamp Camera2 result association and typed
+Python metadata. The existing session inspector prints per-image settings and
+warns on changes; [field definitions and verification](docs/architecture/capture_stability.md).
 
 - `[R]` camera/lens ID
 - `[R]` focal length
@@ -118,7 +122,13 @@ A Python inspection command can print the geometry-relevant settings for every c
 
 ## P1.2 Add a prototype capture-stability mode
 
-[ ] Add the smallest Android-side control needed to make consecutive captures more consistent.
+[x] Add the smallest Android-side control needed to make consecutive captures more consistent.
+
+Implemented as the prototype default: fixed camera/1× zoom, converged focus/crop
+hold and supported AWB lock, with automatic fallback. Observed sequence stability
+is reported separately from requested controls. Build, 30 Android JVM tests,
+170 Python tests and lint pass. Physical capture/lock behavior remains unverified
+because no device is attached; [device check](docs/architecture/capture_stability.md#verification-and-remaining-device-check).
 
 Preferred behavior after the camera has converged:
 
