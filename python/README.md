@@ -78,6 +78,11 @@ names to the local lecture without distributing lecture material.
 
 ## Feature matching and rectification
 
+For a repeatable three-image run through matching, poses, triangulation and BA,
+see the [P0.2 prototype baseline](../docs/experiments/prototype_baseline.md).
+The [implementation reuse map](../docs/architecture/prototype_reuse_map.md)
+lists existing helpers and the remaining P1–P6 adaptations.
+
 ```bash
 python python/scripts/match_session.py data/raw/measurement01 \
     --output data/processed/measurement01/m4

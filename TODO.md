@@ -1,1166 +1,612 @@
-# TODO
+# TODO — Fast camera-pose prototype
 
-This TODO is intentionally written so individual tasks can be handed to a coding agent.
+This TODO is intentionally scoped to **prototyping fast and robust camera-pose recovery** from a short, ordered phone capture sequence.
 
-Legend:
+The coding agent should execute **one task at a time**, keep changes small, and prefer existing code over new implementations.
+
+## Legend
 
 - `[ ]` not started
 - `[~]` in progress
 - `[x]` complete
+- `[R]` reuse an implementation that already exists in the repository; inspect it before changing or duplicating it
 - **Acceptance** = objective completion criteria
 
 ---
 
-# Current focus — visual recovery at an unknown scale
+# Agent rules
 
-Metric scale work is shelved while scene shape and camera poses are inspected.
-The original milestone history below remains intact.
+These rules apply to every task below.
 
-- [x] Separate image-only camera/scene recovery from sensor and known-length inputs.
-- [x] Recover an independent eight-camera reference and compare the previous poses.
-- [x] Store point lists above 100,000 points in BSON without changing record fields.
-- [x] Load bounded BSON batches in a worker for GPU scene inspection.
-- [x] Generate a one-million-point inspection model from genuinely supported samples
-  (accepted target revised from two million).
+1. **Inspect before implementing.** Search the repository for an existing implementation, helper, test, CLI, schema, or dependency before writing new code.
+2. **Reuse first.** If the required capability already exists, adapt or call it instead of creating a parallel implementation.
+3. **Dependency gate.** Before adding any dependency:
+   - inspect `python/pyproject.toml`, Android Gradle files, and the current imports/dependency graph;
+   - determine whether the task can reasonably be completed with dependencies already present;
+   - prefer standard-library, Android/AndroidX, NumPy/SciPy, and OpenCV functionality already available;
+   - add a dependency only when the current stack cannot provide the required capability without substantial custom implementation;
+   - document the reason in the commit/PR/task notes.
+4. **No speculative architecture.** Implement only what is required by the current task and its acceptance criteria.
+5. **Preserve compatibility.** Do not rewrite working reconstruction modules merely to make them cleaner.
+6. **Tests before expansion.** Add focused unit/regression tests for new math and data transformations.
+7. **Measure performance.** New tracking/matching stages must report their runtime and counts so later optimizations are evidence-based.
+8. **Keep the prototype debuggable.** Save compact diagnostics and visualizations where they materially help verify geometry.
 
-See [visual recovery workflow](docs/architecture/visual_reference.md) and
-[camera comparison](docs/experiments/image_only_reference.md).
+## Current dependency policy
 
-# M0 — Repository bootstrap
+The Python project already has the core numerical/vision stack needed for this prototype, including NumPy, SciPy and OpenCV. Assume **no additional Python dependency is needed** unless repository inspection proves otherwise.
 
-## T0.1 Create repository skeleton
-
-[x] Create the folder structure described in `README.md`.
-
-**Acceptance**
-
-- `android/`, `python/`, `data/`, `docs/`, `tools/`, and `local/` exist.
-- `local/lecture/` is ignored by Git.
-- Empty tracked data folders contain `.gitkeep` where necessary.
-
-## T0.2 Add Python project metadata
-
-[x] Add `python/pyproject.toml`.
-
-Use Python 3.12+ and initial dependencies:
-
-- numpy
-- scipy
-- opencv-python
-- pandas
-- pyyaml
-- open3d
-- matplotlib
-- pytest
-
-Add a package named `distance_measuring`.
-
-**Acceptance**
-
-```bash
-cd python
-python -m pip install -e .
-python -c "import distance_measuring"
-pytest
-```
-
-all succeed.
-
-## T0.3 Add formatting/linting
-
-[x] Configure Ruff.
-
-**Acceptance**
-
-```bash
-ruff check .
-```
-
-passes on a clean checkout.
+For Android, inspect the existing CameraX/Camera2 and AndroidX setup first. Do not add an Android computer-vision library until the task cannot reasonably be completed with the current app APIs or by keeping the relevant prototype logic on the Python side.
 
 ---
 
-# M1 — Minimal Android capture app
+# P0 — Inventory and preserve existing building blocks
 
-Goal: create trustworthy raw datasets, not a polished UI.
+## P0.1 Map existing implementations
 
-Implementation lives in `android/`; build/export instructions and the physical-device
-acceptance checklist are in `android/README.md`. Tasks marked `[~]` have an
-implementation but still require validation on a physical phone.
+[x] Inspect the repository and write a short implementation map for the modules needed by this prototype.
 
-Automated verification: `:app:assembleDebug`, `:app:testDebugUnitTest` (15 tests),
-and `:app:lintDebug` pass through the Gradle wrapper on JDK 17 / Android SDK 35.
+Implementation map: [prototype reuse map](docs/architecture/prototype_reuse_map.md).
 
-## T1.1 Create Android project
+Mark at least the location and callable interface for:
 
-[~] Create a minimal Kotlin Android application in `android/`.
+- `[R]` session loading and timestamp validation
+- `[R]` camera intrinsics and undistortion
+- `[R]` feature extraction/matching infrastructure
+- `[R]` essential/fundamental matrix estimation and RANSAC verification
+- `[R]` relative pose recovery
+- `[R]` triangulation
+- `[R]` scene / track representation
+- `[R]` reprojection residuals and bundle adjustment
+- `[R]` Android sensor recording and image metadata
 
-Preferred stack:
-
-- Kotlin
-- one Activity
-- CameraX unless a Camera2 requirement becomes necessary
-- no Compose dependency unless it genuinely keeps the app simpler
-
-**Acceptance**
-
-- App builds from command line.
-- App launches on a physical Android phone.
-- One screen is shown.
-
-## T1.2 Implement minimal UI
-
-[x] Add:
-
-- `Start timeline`
-- `Take picture`
-- `End timeline`
-- recording state text
-- image counter
-
-Behavior:
-
-- `Take picture` disabled outside an active timeline.
-- `Start timeline` disabled while recording.
-- `End timeline` disabled while idle.
+Do not change implementations in this task unless something is broken enough to prevent inspection.
 
 **Acceptance**
 
-State transitions cannot accidentally create overlapping sessions.
+Create `docs/architecture/prototype_reuse_map.md` containing the existing file/module/function names and any missing capability required by P1–P6.
 
-## T1.3 Create session directory
+## P0.2 Establish one prototype dataset and baseline command
 
-[x] On `Start timeline`, create a unique directory containing:
+[x] Select one existing short capture with at least 3 usable images and gyro data as the baseline dataset.
 
-```text
-session.json
-sensors.csv
-events.jsonl
-images/
-```
+Baseline: [measurement01 command and results](docs/experiments/prototype_baseline.md).
+Images 0/1/2; 31.5 s; 318 verified pair matches; 3 cameras; 206 sparse points;
+reprojection RMSE 0.864250 → 0.269012 working pixels after BA. Repeat run reproduced
+geometry exactly; calibration/timing/quality limitations are recorded in the notes.
 
-Use a readable session ID based on UTC or local date/time plus a collision-safe suffix if needed.
+Add or identify one command that runs the current visual reconstruction far enough to produce camera poses and sparse points.
 
-**Acceptance**
+Record:
 
-Starting and ending two sessions creates two independent directories.
-
-## T1.4 Record accelerometer
-
-[~] Register the Android accelerometer sensor for the complete active timeline.
-
-Write:
-
-```text
-timestamp_ns,sensor_type,x,y,z,w,accuracy
-```
-
-Use the sensor event monotonic timestamp.
+- image count,
+- runtime,
+- verified match count,
+- reconstructed camera count,
+- sparse point count,
+- reprojection RMSE if available.
 
 **Acceptance**
 
-- Samples exist continuously between start and end.
-- Timestamps are increasing.
-- No sample is written after timeline end.
+The same dataset and command can be used before and after later tasks to compare speed and geometry.
 
-## T1.5 Record gyroscope
+---
 
-[~] Add gyroscope samples to the same timeline.
+# P1 — Make capture geometry predictable
+
+Goal: reduce unnecessary variation before improving matching.
+
+## P1.1 Record the camera settings that affect geometry
+
+[ ] Inspect the existing Android capture path and ensure every image records, where available:
+
+- `[R]` camera/lens ID
+- `[R]` focal length
+- `[R]` image dimensions
+- `[R]` orientation
+- `[R]` exposure time and ISO
+- focus distance
+- zoom/crop region or equivalent
+- AE/AWB/AF mode and lock state
+- sensor/frame timestamp when available
+
+Do not duplicate metadata already present.
 
 **Acceptance**
 
-The CSV contains distinguishable `gyroscope` samples with valid monotonic timestamps.
+A Python inspection command can print the geometry-relevant settings for every captured image and warn when they change within a session.
 
-## T1.6 Record rotation vector
+## P1.2 Add a prototype capture-stability mode
 
-[x] Record Android rotation-vector sensor when available.
+[ ] Add the smallest Android-side control needed to make consecutive captures more consistent.
 
-Fallback:
+Preferred behavior after the camera has converged:
 
-- mark it unavailable in `session.json`,
-- continue recording accelerometer and gyroscope.
+- keep the same physical camera/lens,
+- keep zoom/crop constant,
+- avoid focus changes between images where the device API allows it reliably,
+- optionally lock AWB,
+- optionally lock AE only when it does not make the capture unusable.
+
+Do not build a settings UI. A prototype default or one simple toggle is sufficient.
 
 **Acceptance**
 
-The app does not fail on a device without rotation-vector support.
+A captured sequence reports whether lens, focal length, focus and crop remained stable. Failure to lock an unsupported control must not break capture.
 
-## T1.7 Capture JPEG image
+---
 
-[~] Implement `Take picture`.
+# P2 — Cheap, informative feature tracks
+
+Goal: obtain stable 2D tracks without exhaustive descriptor matching.
+
+Implement this in Python first using the existing OpenCV dependency. Porting it into the Android preview path is a later task in this TODO only after the algorithm works on recorded images/frames.
+
+## P2.1 Add spatially distributed track points
+
+[ ] Implement a feature-selection function for tracking.
+
+First try existing repository extractors/utilities. If no suitable tracker seed selection exists, use OpenCV functionality already available, preferably Shi-Tomasi (`goodFeaturesToTrack`) or an equivalent existing detector.
 
 Requirements:
 
-- save full-resolution/high-quality JPEG,
-- stable increasing filename,
-- do not interrupt sensor capture,
-- append an image event to `events.jsonl`.
+- configurable maximum point count,
+- image grid / tile quota so features cover the frame,
+- minimum point spacing,
+- retain response/quality score,
+- deterministic enough for regression testing.
 
 **Acceptance**
 
-Three button presses create exactly three readable JPEG files and three corresponding events.
+On the baseline dataset, selected points cover the image instead of collapsing into one high-texture region. Save one debug visualization.
 
-## T1.8 Timestamp image capture
+## P2.2 Track points temporally with pyramidal optical flow
 
-[x] Establish the best available timestamp for each image.
+[ ] Track the selected points between consecutive images or available preview frames.
 
-First implementation may store:
+Use existing OpenCV functionality if available in the current dependency set, preferably pyramidal Lucas-Kanade.
 
-- button-request timestamp,
-- callback timestamp.
+For every track observation store:
 
-Prefer additionally storing the actual camera sensor/frame timestamp if CameraX/Camera2 exposes it reliably.
-
-Document the clock domain of every timestamp.
-
-**Acceptance**
-
-- Every image event contains at least one monotonic timestamp.
-- The implementation contains a short comment/doc explaining whether the timestamp is request time, callback time, or sensor exposure time.
-
-## T1.9 Persist camera metadata
-
-[x] Store per-image metadata needed by reconstruction where available:
-
-- width
-- height
-- focal length
-- orientation
-- camera/lens ID
-- exposure time
-- ISO
-- timestamp
+- image/frame ID,
+- pixel coordinate,
+- track ID,
+- tracking error/status,
+- track age.
 
 **Acceptance**
 
-A Python script can read the metadata without Android-specific tooling.
+The baseline sequence produces persistent multi-frame tracks and reports tracking runtime per image pair.
 
-## T1.10 Finalize session safely
+## P2.3 Reject unstable optical-flow tracks
 
-[~] On `End timeline`:
+[ ] Add a forward/backward consistency check:
 
-- stop listeners,
-- flush/close files,
-- write final session metadata,
-- record `timeline_end`.
+1. track image A → B,
+2. track the result B → A,
+3. reject points whose round-trip pixel error exceeds a configurable threshold.
 
-Handle app pause/close gracefully where possible.
+Also reject points that leave valid image bounds or whose tracker status is invalid.
 
 **Acceptance**
 
-A normally ended session is internally consistent and readable after reconnecting the phone.
+Debug output shows accepted/rejected counts and the median forward/backward error.
 
-## T1.11 Manual export workflow
+## P2.4 Replenish tracks only where needed
 
-[x] Document the phone path from which a session should be copied into:
+[ ] When the active track count falls below a threshold, detect new points only in under-populated grid cells and away from active tracks.
+
+Do not redetect the whole frame every time if enough tracks remain.
+
+**Acceptance**
+
+A longer sequence maintains approximately the requested active-track budget without resetting track IDs every frame.
+
+---
+
+# P3 — Use IMU rotation to separate useful parallax
+
+Goal: distinguish image motion caused mostly by camera rotation from motion that provides translational baseline.
+
+## P3.1 Reuse and expose gyro data at image/frame timestamps
+
+[ ] Use the existing sensor/session loader to obtain gyroscope samples around each image timestamp.
+
+If interpolation/integration utilities already exist, reuse them. Otherwise add the minimum gyro integration needed to estimate **relative orientation only** over short intervals.
+
+Do not attempt accelerometer-based position or metric scale.
+
+**Acceptance**
+
+For each consecutive image pair, output a relative rotation estimate and the number/time span of gyro samples used.
+
+## P3.2 Define and test the device-to-camera rotation convention
+
+[ ] Identify the coordinate transform between Android sensor axes and the selected camera axes.
+
+Reuse existing coordinate-convention documentation/tests if present.
+
+Add a synthetic or controlled test that verifies the sign and axis convention for at least yaw, pitch and roll.
+
+**Acceptance**
+
+A known synthetic device rotation predicts the expected image-motion direction.
+
+## P3.3 Predict rotation-only pixel motion
+
+[ ] Given intrinsics `K` and relative rotation `R`, predict where a tracked pixel would move if the camera only rotated.
+
+For normalized image ray `x`:
 
 ```text
-data/raw/<session_id>/
+x' ~ K R K^-1 x
 ```
 
-Do not add network/cloud export yet.
+Compute the residual between the observed tracked position and this rotation-only prediction.
+
+Call this residual `parallax_px` for now; do not interpret it as metric translation.
 
 **Acceptance**
 
-A new developer can capture a session and manually copy it into the repository using only the instructions.
+For a rotation-dominated synthetic test, median residual parallax is near zero. For a translated scene, residual parallax is measurably larger.
+
+## P3.4 Rank tracks by geometric usefulness
+
+[ ] Add a lightweight score for pose initialization using only quantities available before a full 3D reconstruction.
+
+Start with:
+
+- track age,
+- detector response,
+- forward/backward flow error,
+- residual parallax after rotation compensation,
+- spatial cell occupancy.
+
+Do not introduce a learned model.
+
+**Acceptance**
+
+The code can request the best `N` tracks and returns a spatially distributed set with non-trivial residual parallax.
 
 ---
 
-# M2 — Dataset contract and inspection
+# P4 — Bootstrap camera poses cheaply
 
-Verified against the local `data/raw/measurement01` capture: five decodable images,
-all three sensor streams, and no validation errors. The Python suite has 121 passing
-tests. See `docs/experiments/measurement01_inspection.md` for aggregate results.
+Goal: obtain the first reliable camera pair without exhaustive matching.
 
-## T2.1 Define Python schema models
+## P4.1 Select a bootstrap pair from tracked parallax
 
-[x] Implement schema/data classes for:
+[ ] From the ordered images, choose the earliest pair that has:
 
-- session
-- sensor sample
-- image event
-- image metadata
+- enough surviving tracks,
+- sufficient spatial coverage,
+- sufficient median residual parallax,
+- no obvious degenerate pure-rotation behavior.
 
-**Acceptance**
-
-Malformed required fields produce clear errors.
-
-## T2.2 Implement session loader
-
-[x] Implement:
-
-```python
-load_session(path)
-```
-
-Return one coherent in-memory session object.
+Thresholds must be configuration values and printed in diagnostics.
 
 **Acceptance**
 
-A valid captured Android session loads with one call.
+The baseline dataset either selects a pair and explains its score or fails with a clear reason.
 
-## T2.3 Validate timelines
+## P4.2 Estimate the first relative pose
 
-[x] Validate:
+[ ] Feed the selected 2D correspondences into the existing calibrated two-view geometry.
 
-- timeline start < image timestamps < timeline end,
-- monotonically increasing sensor timestamps,
-- sensor coverage around all image timestamps,
-- filenames exist,
-- images decode successfully.
+Reuse:
 
-**Acceptance**
+- `[R]` undistortion / normalized points,
+- `[R]` essential-matrix estimation,
+- `[R]` RANSAC geometric verification,
+- `[R]` cheirality-based relative-pose recovery.
 
-Each invalid condition has a regression test.
-
-## T2.4 Session inspection script
-
-[x] Add:
-
-```bash
-python python/scripts/inspect_session.py data/raw/<session>
-```
-
-Print:
-
-- duration
-- sensor counts
-- sensor rates
-- image timestamps
-- time differences between images
-- missing metadata warnings
-
-Optionally plot acceleration magnitude and image timestamps.
+Do not create a second essential-matrix implementation.
 
 **Acceptance**
 
-The script provides enough information to detect an obviously bad recording.
+The bootstrap reports:
+
+- input track count,
+- RANSAC inlier count,
+- recovered relative rotation,
+- translation direction,
+- runtime.
+
+## P4.3 Triangulate only strong bootstrap landmarks
+
+[ ] Use the existing triangulation code to initialize a small landmark set.
+
+Keep only points satisfying configurable quality gates:
+
+- positive depth / cheirality,
+- reprojection-error limit,
+- minimum triangulation angle,
+- valid observations in both bootstrap views.
+
+**Acceptance**
+
+The bootstrap produces a compact 3D landmark set with per-point reprojection error and triangulation angle.
 
 ---
 
-# M3 — Camera model and calibration
+# P5 — Incremental pose estimation and guided correspondence
 
-For this milestone use the variable names and comment references of the Matrices as given in local/lecture/002 - Image Formation and Acquisition.pptx
+Goal: after the first two cameras, stop searching the whole image.
 
-Implemented with lecture-slide references and original notes under `docs/math/`:
-homogeneous coordinates, K, external T_scene, 3×4 M, normalized 3D DLT using the
-minimum eigenvector, and RQ decomposition. The checkerboard tool uses the related
-multi-view planar method and nonlinear lens-distortion refinement. The Python
-suite passes 189 tests; see `docs/experiments/m3_calibration_validation.md`.
-`measurement01` currently uses approximate metadata-derived K until a matching
-physical checkerboard calibration is captured.
+## P5.1 Add PnP pose estimation using existing OpenCV
 
-## T3.1 Implement camera intrinsic model
+[ ] For a new image, collect 2D observations that correspond to already-triangulated 3D landmarks and estimate the new camera pose with PnP + RANSAC.
 
-[x] Add a camera-intrinsics class containing:
+Before implementing, search for an existing PnP helper. If absent, use the OpenCV dependency already present; do not add a new solver library.
 
-- `fx`
-- `fy`
-- `cx`
-- `cy`
-- distortion coefficients
-- image size
+Prefer `solvePnPRansac` followed by an existing/refinement routine when justified.
 
 **Acceptance**
 
-Projection/unit tests cover known points.
+A synthetic test recovers a known pose within defined rotation/translation-direction tolerances, and the baseline sequence can add at least one post-bootstrap camera when enough correspondences exist.
 
-## T3.2 Calibration utility
+## P5.2 Predict landmark positions in the next image
 
-[x] Add a checkerboard or Charuco calibration tool under:
+[ ] Project existing 3D landmarks into the next image using the current coarse pose.
 
-```text
-tools/calibration/
-```
+For each projected landmark store:
 
-**Acceptance**
+- predicted pixel,
+- visibility/in-bounds flag,
+- current observation count,
+- expected search radius.
 
-It can create a YAML calibration file from a folder of calibration images.
-
-## T3.3 Undistortion
-
-[x] Implement image/point undistortion.
+Use gyro rotation as an optional prior before PnP when it is available and consistent.
 
 **Acceptance**
 
-Synthetic distortion/undistortion test stays below defined numerical error.
+Debug visualization overlays projected landmark positions on the new image.
 
-## T3.4 Metadata fallback intrinsics
+## P5.3 Implement local descriptor/patch search around projections
 
-[x] Estimate intrinsics from phone metadata if no calibration file exists.
+[ ] Search for each projected landmark only in a bounded local window instead of the full image.
 
-Mark them as approximate.
+First inspect and reuse the existing feature/descriptor implementation. Prefer using an already-supported descriptor or OpenCV primitive. Do not add SuperPoint, LightGlue or another ML dependency.
+
+The search must support:
+
+- configurable radius,
+- best/second-best ambiguity check where applicable,
+- optional mutual consistency,
+- rejection when no convincing local candidate exists.
 
 **Acceptance**
 
-The pipeline clearly prints which intrinsic source was used:
+Report average candidates examined per landmark and runtime. On the baseline dataset, local search examines substantially fewer candidates than exhaustive pairwise matching.
 
-- calibrated
-- metadata-derived
-- heuristic
+## P5.4 Add epipolar-guided search for non-landmark features
+
+[ ] For features that do not yet correspond to a 3D landmark, use the current camera poses to restrict matching to an epipolar corridor.
+
+Do not rectify the full image for sparse matching.
+
+Search only within a configurable distance of the predicted epipolar line and within plausible image bounds.
+
+**Acceptance**
+
+A debug visualization shows the epipolar corridor and accepted/rejected candidate matches for a selected feature set.
+
+## P5.5 Triangulate newly confirmed tracks
+
+[ ] Extend the scene with new landmarks only after guided correspondences pass geometric checks.
+
+Reuse `[R]` track merging and `[R]` triangulation.
+
+Retain per-landmark quality values:
+
+- observation count,
+- best/median triangulation angle,
+- reprojection error.
+
+**Acceptance**
+
+Adding a camera can also grow the landmark set without rerunning global all-pairs matching.
 
 ---
 
-# M4 — Feature extraction and matching
+# P6 — Iterative refinement loop
 
-Implemented with lecture page references in code and original notes under
-`docs/math/feature_matching.md`: sparse correspondence, epipolar verification,
-and projective rectification. SIFT/ratio/RANSAC are identified as extensions to
-the deck's block-matching examples. The full Python suite passes 237 tests.
-All three requested pairs in `measurement01` produce rectified accepted/rejected
-match previews; see `docs/experiments/m4_matching_validation.md` and
-`docs/architecture/feature_matching.md`. Intrinsics remain explicitly approximate
-until a matching physical camera calibration is supplied.
+Goal: use every improved pose estimate to make the next correspondence search narrower and more reliable.
 
-## T4.1 Feature extraction interface
+## P6.1 Add local bundle adjustment around the newest camera
 
-[x] Implement a backend interface.
+[ ] Reuse the existing SciPy bundle-adjustment implementation.
 
-First backend: SIFT.
+Adapt it minimally so a local window can refine:
 
-Return:
+- the newest camera,
+- a small configurable number of neighboring cameras,
+- the landmarks observed by those cameras.
 
-- keypoint pixel coordinates,
-- descriptor matrix,
-- response/scale metadata.
+Keep the global gauge fixed using the existing convention.
+
+Do not introduce Ceres, GTSAM or another optimizer.
 
 **Acceptance**
 
-Running twice on the same image is deterministic enough for regression testing.
+Local BA lowers or preserves reprojection RMSE on the baseline sequence and reports runtime separately from matching/PnP.
 
-## T4.2 Pairwise matcher
+## P6.2 Re-run guided correspondence after pose refinement
 
-[x] Match descriptors for image pairs.
+[ ] After local BA:
 
-Initial filters:
+1. reproject landmarks using the refined pose,
+2. reduce the local search radius when uncertainty/reprojection error permits,
+3. retry previously unmatched projected landmarks,
+4. add newly confirmed observations,
+5. triangulate newly complete tracks.
 
-- nearest-neighbor descriptor match,
-- Lowe ratio test,
-- optional mutual consistency.
-
-**Acceptance**
-
-Debug output reports raw and retained match counts.
-
-## T4.3 Geometric verification
-
-[x] Use RANSAC with fundamental or essential matrix estimation.
+Limit the first prototype to a small fixed number of refinement rounds, e.g. 2.
 
 **Acceptance**
 
-Outlier matches are marked separately in a debug visualization.
+The second guided-search round either adds valid observations/landmarks or exits because no meaningful improvement is available. It must not loop indefinitely.
 
-## T4.4 Match visualization
+## P6.3 Add point-confidence filtering for pose work
 
-[x] Write rectified debug images for:
+[ ] Compute a simple landmark confidence score from existing geometric diagnostics.
 
-- image 0 ↔ 1
-- image 1 ↔ 2
-- image 0 ↔ 2
+Use only currently available measurements, initially:
 
-**Acceptance**
-
-Each output distinguishes geometrically accepted matches.
-
----
-
-# M5 — Relative camera pose
-
-Implemented with page-specific lecture comments and original derivations in
-`docs/math/relative_pose.md`: calibrated E, minimum-eigenvector consensus fit,
-explicit SVD/four-way cheirality, parallax checks, and external-transform chaining.
-The Python suite passes 276 tests; see `docs/experiments/m5_pose_validation.md`.
-All three `measurement01` camera frames can be rendered, with independent unit
-baselines clearly labeled. Its 17° rotation-loop disagreement is reported as an
-inconsistency; this is not yet a verified three-view or metric reconstruction.
-Usage/output details are in `docs/architecture/relative_pose.md`.
-
-## T5.1 Essential matrix estimation
-
-[x] Given calibrated points, estimate `E`.
-
-**Acceptance**
-
-Synthetic test with known camera motion recovers a valid essential matrix up to scale/sign.
-
-## T5.2 Relative pose recovery
-
-[x] Recover:
-
-- relative rotation,
-- translation direction.
-
-Use cheirality to choose the valid decomposition.
-
-**Acceptance**
-
-Synthetic camera rotation is recovered within a defined angular tolerance.
-
-## T5.3 Three-camera pose chaining
-
-[x] Establish a first world frame:
-
-```text
-camera 0:
-    position = [0, 0, 0]
-    rotation = identity
-```
-
-Add camera 1 and camera 2.
-
-Do not pretend chained translation magnitudes are metrically correct.
-
-**Acceptance**
-
-All three camera frames can be rendered in one coordinate system.
-
----
-
-# M6 — Feature tracks and sparse reconstruction
-
-Implemented with page-specific lecture comments and original notes in
-`docs/math/sparse_reconstruction.md`: conflict-checked tracks, all-view linear
-triangulation through K/[R|O]/3×4 M, SVD or minimum eigenvectors, and persistent
-scene JSON with reciprocal point/track references. The Python suite passes
-330 tests. `measurement01` retains 206 points from 238 tracks; 32 tracks fail
-reprojection checks. Its unresolved baseline scales and 17° pose-loop warning
-are preserved. See `docs/experiments/m6_reconstruction_validation.md` and
-`docs/architecture/sparse_reconstruction.md`.
-
-## T6.1 Track builder
-
-[x] Merge pairwise matches into multi-image feature tracks.
-
-Prevent invalid tracks containing:
-
-- two different features from the same image,
-- contradictory unions.
-
-**Acceptance**
-
-Unit tests cover track merging and conflict rejection.
-
-## T6.2 Triangulation
-
-[x] Implement linear triangulation.
-
-Reject points:
-
-- behind cameras,
-- with high reprojection error,
-- with poor triangulation angle.
-
-**Acceptance**
-
-Synthetic 3D points reconstruct up to expected numerical tolerance.
-
-## T6.3 Scene model
-
-[x] Implement persistent scene objects for:
-
-- cameras,
-- 3D points,
-- 2D observations,
-- track IDs,
-- reconstruction metadata.
-
-**Acceptance**
-
-Scene can be serialized to JSON and loaded back without meaningful loss.
-
----
-
-# M7 — Bundle adjustment
-
-Implemented with page-specific lecture comments and original notes in
-`docs/math/bundle_adjustment.md`: ideal-pixel reprojection, joint sparse robust
-least squares, fixed first pose and exact first-baseline scale, and refined scene
-export with stable IDs and full before/after diagnostics. The Python suite passes
-353 tests. `measurement01` converges in 47 evaluations and reduces observation
-RMSE from 0.86425 to 0.26901 working pixels without dropping observations. Its
-calibration/scale/geometry remain unverified and input warnings are preserved.
-See `docs/experiments/m7_bundle_adjustment_validation.md` and
-`docs/architecture/bundle_adjustment.md`.
-
-## T7.1 Reprojection residuals
-
-[x] Implement reprojection residual vector.
-
-**Acceptance**
-
-Residual is approximately zero on perfect synthetic observations.
-
-## T7.2 Optimize cameras and points
-
-[x] Use `scipy.optimize.least_squares`.
-
-Fix gauge freedoms:
-
-- camera 0 pose fixed,
-- one scale convention fixed before metric calibration.
-
-**Acceptance**
-
-On noisy synthetic data, optimization lowers total reprojection RMSE.
-
-## T7.3 Robust loss
-
-[x] Add configurable robust loss.
-
-**Acceptance**
-
-A small set of outliers does not catastrophically move the whole reconstruction.
-
-## T7.4 Bundle-adjusted scene export
-
-[x] Save:
-
-- optimized cameras
-- optimized points
-- observation reprojection errors
-- summary metrics
-
-**Acceptance**
-
-Before/after reprojection error is printed.
-
----
-
-# M8 — Desktop 3D visualization
-
-Implemented with lecture-page comments in the inverse-K ray/frustum geometry and
-original notes in `docs/math/scene_viewer.md`. Open3D displays sparse points,
-distinct colored camera centers/frustums and forward axes. A headless preview
-adds camera-ID labels; CLI listing and one/two-point selection preserve stable IDs
-and source hashes. The Python suite passes 375 tests; actual Open3D rendering was
-verified under a virtual display. See `docs/experiments/m8_viewer_validation.md`
-and `docs/architecture/scene_viewer.md`. Scale and quality warnings remain explicit.
-
-The [GPU browser viewer](docs/architecture/scene_viewer.md) additionally exports
-an offline interactive HTML artifact with orbit/pan/zoom, camera views, photo
-planes, GPU point picking, observation rays and quality filters. The latest
-export now contains 20,000 points (941 sparse + 19,059 stereo samples) and
-cameras 2, 3, 7. All original points/camera parameters and metric-scale status
-are unchanged. Added samples are inspection data with separate provenance.
-
-## T8.1 Open3D viewer
-
-[x] Show:
-
-- sparse point cloud,
-- camera centers,
-- camera view directions/frustums.
-
-**Acceptance**
-
-A user can visually distinguish all three cameras.
-
-## T8.2 Point IDs
-
-[x] Preserve stable point IDs through scene serialization and visualization.
-
-**Acceptance**
-
-A selected/logged point can be referenced in later measurement commands.
-
-## T8.3 Point selection
-
-[x] Allow selecting one or two reconstructed points.
-
-If direct interactive selection is awkward in the first version, a CLI fallback using point IDs is acceptable.
-
-**Acceptance**
-
-The user can unambiguously specify point A and point B.
-
----
-
-# M9 — Measurement engine
-
-## T9.1 Point-to-point distance
- as reference use the image, it is a ruler and has scales on it in cm. verifiy it fits, if it deviates more tha  10% stop
-
-**Status: measurement engine still incomplete.** The
-[original ruler check](docs/experiments/m9_ruler_validation.md) failed. The
-[pairwise/acceleration retry](docs/experiments/ruler_pairwise_acceleration_retry.md)
-passes ruler-reference geometry checks (worst pairwise interval error 1.66%),
-but acceleration-derived metric scale still fails the 10% limit and is not accepted.
-The [scale diagnosis](docs/experiments/measurement01_scale_discrepancy.md) identifies
-orientation jumps unsupported by the gyro. A gyro-orientation trial reaches
-approximately 4.95 cm for 5 cm, but timing/bias sensitivity still exceeds the
-limit; metric scale remains unaccepted.
-
-The [2026-10-23 subset retry](docs/experiments/measurement_20261023_091847_subset.md)
-now excludes unusable views and retains cameras 2, 3, 7. Visual validation passes;
-ruler observations in photos 2–3 then yield a 10.46% held-out deviation, so the
-10% gate stops measurement. The acceleration fit also rejects a negative scale.
-Camera geometry remains image-only; at least two usable views must remain.
-
-[ ] Implement:
-
-```python
-distance_points(point_a, point_b)
-```
-
-**Acceptance**
-
-Unit tests cover known 3D points.
-
-## T9.2 Camera-to-point distance
-
-[ ] Implement:
-
-```python
-distance_camera_point(camera, point)
-```
-
-Use the camera center in world coordinates.
-
-**Acceptance**
-
-Unit test uses analytically known distance.
-
-## T9.3 Coordinate-frame conversion
-
-[ ] Support reporting point coordinates in:
-
-- world frame,
-- selected camera frame.
-
-**Acceptance**
-
-Round-trip world → camera → world stays within numerical tolerance.
-
-## T9.4 Measurement report
-
-[ ] Add CLI output including:
-
-- measurement type,
-- involved IDs,
-- raw reconstruction units,
-- scale source,
-- metric result when scale is available.
-
-**Acceptance**
-
-The program never labels an arbitrary-scale value as meters.
-
----
-
-# M10 — Manual scale calibration baseline
-
-## T10.1 Set scale from known point distance
-
-[ ] Add:
-
-```bash
-python python/scripts/estimate_scale.py \
-    <scene> \
-    --point-a 123 \
-    --point-b 456 \
-    --distance-m 0.500
-```
-
-**Acceptance**
-
-All camera translations and 3D points are scaled consistently.
-
-## T10.2 Scale provenance
-
-[ ] Store scale metadata in `scene.json`.
-
-Example:
-
-```json
-{
-  "scale": {
-    "value": 0.042,
-    "units_per_reconstruction_unit": "m",
-    "source": "known_distance",
-    "reference": {
-      "point_a": 123,
-      "point_b": 456,
-      "distance_m": 0.5
-    }
-  }
-}
-```
-
-**Acceptance**
-
-Metric measurements can state exactly how the scale was obtained.
-
-## T10.3 Ground-truth experiment
-
-[ ] Record a simple scene containing several physically measured distances.
-
-Compare reconstructed measurements against ground truth.
-
-**Acceptance**
-
-Create an experiment note containing absolute and relative measurement errors.
-
----
-
-# M11 — IMU preprocessing
-
-The experimental [visual-heading path](docs/math/visual_heading.md) now retains
-compass/game-vector data, records camera frame timestamps when their clock is
-comparable, estimates gyro offset from a checked declared rest window, and anchors
-gyro heading to images while preserving gyro tilt. Compass sets only one world
-reference. Disconnected image overlaps abort. The old recording lacks raw compass
-data and a valid starting rest window; physical validation and full accelerometer
-bias calibration remain outstanding. This does not complete M11/M12 or accept scale.
-
-## T11.1 Load IMU streams
-
-[ ] Split `sensors.csv` into typed streams.
-
-**Acceptance**
-
-Accelerometer, gyro, and rotation-vector samples are individually accessible.
-
-## T11.2 Interpolate orientation at image timestamps
-
-[ ] Convert the recorded orientation representation into rotations.
-
-Use quaternion interpolation where appropriate.
-
-**Acceptance**
-
-Each image timestamp has an estimated device orientation.
-
-## T11.3 Coordinate convention document
-
-[ ] Document:
-
-- Android sensor axes,
-- camera axes,
-- image axes,
-- world axes,
-- handedness,
-- quaternion ordering.
-
-**Acceptance**
-
-A synthetic transform test verifies the documented convention.
-
-## T11.4 Gravity handling
-
-[ ] Rotate acceleration into a consistent frame and estimate/remove gravity.
-
-Do not assume Android axes equal camera axes.
-
-**Acceptance**
-
-During a stationary interval, gravity-removed acceleration is close to zero relative to raw gravity magnitude.
-
-## T11.5 Bias estimation
-
-[ ] Estimate accelerometer bias from stationary or optimization constraints.
-
-**Acceptance**
-
-Bias is exposed in debug output and stored with an IMU solution.
-
----
-
-# M12 — IMU scale estimation research
-
-This milestone is experimental. Keep it separate from the reliable visual baseline.
-
-## T12.1 Naive double-integration experiment
-
-[ ] Integrate acceleration between image timestamps.
-
-Purpose: establish how bad uncorrected drift is.
-
-**Acceptance**
-
-An experiment report compares predicted displacement against one physically measured motion.
-
-## T12.2 Visual/IMU displacement alignment
-
-[ ] Given visual camera positions up to scale and IMU-derived displacement constraints, estimate one global scale factor.
-
-Start with the simplest least-squares formulation.
-
-**Acceptance**
-
-On a controlled dataset, estimated scale is finite and reproducible.
-
-## T12.3 Joint scale/bias optimization
-
-[ ] Optimize at least:
-
-- global visual scale,
-- accelerometer bias,
-- optionally initial velocity.
-
-**Acceptance**
-
-Compare result against manual known-distance scale.
-
-## T12.4 Rotation-vector vs gyro-integrated orientation
-
-[ ] Compare both orientation sources.
-
-**Acceptance**
-
-Experiment report states which gives lower scale error on recorded test sessions.
-
-## T12.5 Uncertainty / quality gate
-
-[ ] Produce a quality score using indicators such as:
-
-- reprojection RMSE,
-- match count,
 - triangulation angle,
-- IMU residual,
-- estimated scale consistency.
+- reprojection error,
+- observation count,
+- consistency across views.
+
+Use this score to decide which landmarks are trusted for PnP and pose refinement.
+
+Do not implement dense surface reconstruction or interpolation here.
 
 **Acceptance**
 
-The tool can refuse to label a reconstruction metric when evidence is too weak.
+PnP can be run using only landmarks above a configurable confidence threshold, and diagnostics show how many points were excluded.
 
 ---
 
-# M13 — End-to-end three-image command
+# P7 — Keyframes and on-device preview prototype
 
-## T13.1 Implement one-command pipeline
+Do this only after P2–P6 work offline on recorded data.
 
-[ ] Make this work:
+## P7.1 Define keyframe criteria from the working offline pipeline
+
+[ ] Convert measured offline behavior into a keyframe score using:
+
+- surviving track count,
+- spatial coverage,
+- gyro-compensated residual parallax,
+- optionally image blur if an existing implementation already exists or OpenCV can provide it directly.
+
+Avoid adding extra heuristics without evidence from the baseline sequence.
+
+**Acceptance**
+
+Running the score over a sequence labels frames as `skip` or `candidate keyframe` and prints the reason.
+
+## P7.2 Expose preview frames from Android capture
+
+[ ] Inspect the current CameraX/Camera2 pipeline and expose a low-resolution luminance image stream suitable for tracking while a session is active.
+
+Keep full-resolution JPEG capture unchanged.
+
+Do not add a new Android CV dependency in this task unless repository inspection demonstrates that the next task cannot reasonably be implemented without it.
+
+**Acceptance**
+
+The app can process or export timestamped low-resolution preview frames without interrupting sensor recording or still-image capture.
+
+## P7.3 Prototype live feature tracking on Android
+
+[ ] Port only the already-validated minimum from P2/P3 needed to maintain tracks and estimate residual parallax on preview frames.
+
+Before adding any library, explicitly check whether the current Android dependencies already provide the required operations. If not, document why a new dependency is necessary before adding it.
+
+The live prototype only needs to output diagnostics such as:
+
+```text
+tracks: 742
+median FB error: 0.8 px
+rotation-compensated parallax: 31 px
+keyframe: yes
+```
+
+No polished UI is required.
+
+**Acceptance**
+
+On a physical phone, the diagnostic values update during motion and a still image can still be captured normally.
+
+---
+
+# P8 — One prototype command and benchmark
+
+## P8.1 Add the incremental reconstruction command
+
+[ ] Add one command for the prototype, for example:
 
 ```bash
-python python/scripts/reconstruct_three_images.py \
-    data/raw/<session>
+python python/scripts/reconstruct_incremental.py data/raw/<session>
 ```
 
 Pipeline:
 
-1. load session,
-2. validate,
-3. load/calibrate camera,
-4. extract features,
-5. match,
-6. estimate poses,
-7. build tracks,
-8. triangulate,
-9. bundle adjust,
-10. export scene,
-11. optionally estimate scale,
-12. write diagnostics.
+1. `[R]` load and validate session,
+2. `[R]` load intrinsics / undistort,
+3. select and track spatially distributed features,
+4. use gyro to estimate relative rotation,
+5. rank residual-parallax tracks,
+6. choose bootstrap pair,
+7. `[R]` estimate essential matrix and relative pose,
+8. `[R]` triangulate strong initial landmarks,
+9. add later cameras with PnP,
+10. perform projected/local and epipolar-guided correspondence search,
+11. `[R]` triangulate new landmarks,
+12. `[R]` run local bundle adjustment,
+13. repeat guided matching/refinement for a bounded number of rounds,
+14. export scene and diagnostics.
 
 **Acceptance**
 
-One real three-image session finishes without manual intermediate file editing.
+One real short session completes without manual intermediate editing and reconstructs all cameras that have sufficient geometric support.
 
-## T13.2 Deterministic output layout
+## P8.2 Add timing and quality diagnostics
 
-[ ] Store outputs below:
+[ ] Print and save per-stage metrics:
 
-```text
-data/processed/<session_id>/
-```
-
-**Acceptance**
-
-Re-running does not scatter temporary files around the repository.
-
-## T13.3 Summary report
-
-[ ] Print and save:
-
-- number of features per image,
-- verified matches,
-- track count,
-- triangulated point count,
-- reprojection RMSE before/after BA,
-- scale source,
-- measurement readiness.
+- feature-selection time,
+- optical-flow time,
+- gyro integration time,
+- bootstrap RANSAC time,
+- PnP time per camera,
+- guided-search time per camera,
+- local-BA time,
+- total runtime,
+- active track count,
+- RANSAC/PnP inlier counts,
+- landmark count,
+- reprojection RMSE,
+- triangulation-angle statistics.
 
 **Acceptance**
 
-A failed reconstruction explains the stage and likely reason.
+A single report makes it possible to see whether runtime is dominated by tracking, matching, pose estimation or BA.
+
+## P8.3 Compare against the existing baseline
+
+[ ] Run the P0.2 baseline and the new incremental prototype on the same dataset.
+
+Compare only prototype-relevant properties:
+
+- total runtime,
+- camera poses recovered,
+- pose/reprojection consistency,
+- number of descriptor candidates examined,
+- number and quality of sparse landmarks.
+
+Do not optimize for point-cloud density.
+
+**Acceptance**
+
+Create one short experiment note stating whether the incremental approach is faster and whether pose quality is preserved or improved.
 
 ---
 
-# M14 — Robustness improvements
-
-Do these only after the classical three-image path works.
-
-## T14.1 More than three images
-
-[ ] Generalize the pipeline to `N >= 2` images.
-
-## T14.2 Keyframe selection
-
-[ ] Reject frames with too little baseline or excessive blur.
-
-## T14.3 Better feature matching
-
-[ ] Evaluate SuperPoint + LightGlue against SIFT.
-
-Keep SIFT as baseline.
-
-## T14.4 Incremental SfM
-
-[ ] Add cameras progressively instead of relying on one fixed three-view chain.
-
-## T14.5 Loop/track consistency
-
-[ ] Improve global feature-track consistency.
-
-## T14.6 Better bundle adjustment backend
-
-[ ] Evaluate Ceres, GTSAM, or another sparse optimizer only if SciPy becomes a bottleneck.
-
----
-
-# M15 — Android productization
-
-Do not start until Python reconstruction is objectively useful.
-
-## T15.1 Port or package reconstruction
-
-[ ] Decide between:
-
-- native/on-device implementation,
-- embedded Python,
-- local service,
-- server backend.
-
-Document the decision and tradeoffs.
-
-## T15.2 Capture guidance
-
-[ ] Give live user guidance for:
-
-- enough translation/parallax,
-- excessive blur,
-- too-fast motion,
-- poor lighting,
-- insufficient texture.
-
-## T15.3 On-device reconstruction status
-
-[ ] Show stages without exposing unnecessary algorithm details.
-
-## T15.4 3D viewer
-
-[ ] Add an Android 3D scene view.
-
-## T15.5 Touch point selection
-
-[ ] Select 3D points from the reconstructed scene.
-
-## T15.6 Measurement UI
-
-[ ] Support:
-
-- camera ↔ point,
-- point ↔ point,
-- coordinates in chosen camera frame.
-
-## T15.7 Accuracy display
-
-[ ] Display estimated uncertainty / confidence.
-
-Never present false precision.
-
----
-
-# M16 — Documentation tied to the lecture
-
-## T16.1 Personal lecture index
-
-[ ] Create a local-only index under:
-
-```text
-local/lecture/
-```
-
-This may reference local lecture files but is never committed.
-
-## T16.2 Project-owned concept notes
-
-[ ] Write original notes under:
-
-```text
-docs/math/
-```
-
-Suggested topics:
-
-- pinhole camera model
-- homogeneous coordinates
-- feature descriptors
-- epipolar geometry
-- fundamental matrix
-- essential matrix
-- triangulation
-- PnP
-- bundle adjustment
-- IMU coordinate transforms
-- visual-inertial scale
-
-Do not copy lecture material verbatim.
-
-## T16.3 Trace implementation to concepts
-
-[ ] Each major module should link to the relevant project-owned math note.
-
-Example:
-
-```text
-vision/epipolar.py
-    -> docs/math/epipolar_geometry.md
-```
-
----
-
-# Suggested coding-agent order
-
-Give the coding agent one milestone at a time.
-
-Recommended order:
-
-```text
-M0
-M1
-M2
-M3
-M4
-M5
-M6
-M7
-M8
-M9
-M10
-M13
-M11
-M12
-M14
-M15
-M16
-```
-
-The reason `M10` comes before IMU scale work is that a known-distance baseline gives us a trustworthy way to evaluate whether the IMU-derived scale is actually improving the result.
-
----
-
-# Definition of first useful prototype
-
-The project is already useful before the final Android app exists.
-
-The first useful prototype is reached when a user can:
-
-1. record a three-image session on Android,
-2. copy the session into `data/raw/`,
-3. run one Python command,
-4. inspect the reconstructed camera positions and sparse point cloud,
-5. define scale using one known distance,
-6. select reconstructed points,
-7. obtain physically meaningful distances,
-8. inspect reprojection/quality diagnostics.
-
-IMU-derived metric scale is the next research goal, not a prerequisite for validating the rest of the system.
+# Definition of the prototype milestone
+
+The current prototype is successful when:
+
+1. a short ordered Android capture contains stable camera metadata plus gyro timestamps,
+2. spatially distributed points are tracked cheaply across frames,
+3. gyro rotation is used to distinguish rotation from useful residual parallax,
+4. one strong image pair bootstraps the reconstruction,
+5. later cameras are added primarily through 3D→2D correspondences and PnP,
+6. correspondence search is local/projected or epipolar-guided rather than exhaustive,
+7. local bundle adjustment improves the pose and enables a narrower second matching pass,
+8. unreliable landmarks are excluded from pose estimation using geometric quality metrics,
+9. the entire short sequence runs from one command with timing and quality diagnostics.
+
+The prototype does **not** need metric scale, dense reconstruction, surface interpolation, measurement UI, cloud sync, polished Android UI, deep learned features, or production-ready visual-inertial odometry.
