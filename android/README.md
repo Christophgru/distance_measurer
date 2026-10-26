@@ -13,6 +13,16 @@ convergence where supported, with automatic fallback. See
 capture and vendor lock behavior still require the physical-device checks below.
 The debug APK builds; **30 JVM tests** and `lintDebug` pass.
 
+App **0.4** adds optional low-resolution preview analysis with live track/FB/
+gyro-parallax/keyframe diagnostics. It retains normal JPEG resolution or falls
+back to capture without analysis. The pinned OpenCV Android AAR supplies the
+same Shi–Tomasi/LK primitives used offline; the dependency rationale, coordinates,
+clock limitations and phone checklist are in
+[P7 preview tracking](../docs/architecture/preview_tracking.md).
+The debug and instrumentation APKs build, **40 JVM tests** and `lintDebug` pass.
+Native instrumentation tests and physical camera coexistence remain pending;
+no phone is connected to the build workspace.
+
 ## Build and install
 
 Install JDK 17 and the Android SDK (Android Studio's SDK Manager or command-line
@@ -31,6 +41,12 @@ adb devices
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 adb shell am start -n org.distancemeasuring.capture/.MainActivity
 ```
+
+While a timeline is active, inspect preview diagnostics using
+`adb logcat -s PreviewTracking:I '*:S'`. Build the native test APK with
+`./gradlew :app:assembleDebugAndroidTest`; run it on a connected device with
+`./gradlew :app:connectedDebugAndroidTest`. Compiling those tests is separate
+from running them and from the physical camera/JPEG checklist.
 
 On Windows use `gradlew.bat`. The checked-in wrapper pins Gradle 8.11.1 and
 verifies its distribution checksum. First build needs network access to download

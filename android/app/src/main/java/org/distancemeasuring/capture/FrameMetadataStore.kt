@@ -21,6 +21,10 @@ class FrameMetadataStore(private val capacity: Int = 120) {
 
     @Synchronized fun contains(timestampNs: Long) = frames.containsKey(timestampNs) || stillFrames.containsKey(timestampNs)
 
+    /** Analysis must never consume metadata needed by an overlapping JPEG. */
+    @Synchronized fun peek(timestampNs: Long): JSONObject? =
+        (frames[timestampNs] ?: stillFrames[timestampNs])?.let { JSONObject(it.toString()) }
+
     @Synchronized fun take(timestampNs: Long): JSONObject? {
         val still = stillFrames.remove(timestampNs)
         return frames.remove(timestampNs) ?: still

@@ -31,6 +31,7 @@ class CaptureRecorder(context: Context, private val onState: (RecordingState) ->
     private var destroying = false
     private var lastUiNs = 0L
     private var state = RecordingState()
+    val previewGyro = PreviewGyroHistory()
     private val sensors = mapOf(
         "accelerometer" to manager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER),
         "gyroscope" to manager.getDefaultSensor(Sensor.TYPE_GYROSCOPE),
@@ -52,9 +53,10 @@ class CaptureRecorder(context: Context, private val onState: (RecordingState) ->
         }, "sessions")
         val recording = RecordingSession(root, JSONObject()
             .put("manufacturer", Build.MANUFACTURER).put("model", Build.MODEL)
-            .put("android_api", Build.VERSION.SDK_INT).put("app_version", "0.3.0"),
+            .put("android_api", Build.VERSION.SDK_INT).put("app_version", "0.4.0"),
             sensors.mapValues { it.value != null }, SystemClock::elapsedRealtimeNanos)
         session = recording
+        previewGyro.begin(recording.startNs)
         sensors.forEach { (name, sensor) ->
             // 100 Hz requested, no hardware batching. Actual rates are device dependent.
             val registered = sensor != null && manager.registerListener(this, sensor, 10_000, handler)
@@ -185,6 +187,9 @@ class CaptureRecorder(context: Context, private val onState: (RecordingState) ->
         recording.recordSensor(SensorSample(event.timestamp, type,
             values[0], values[1], values[2], w, event.accuracy))
         val now = SystemClock.elapsedRealtimeNanos()
+        if (type == "gyroscope" && event.timestamp > recording.startNs && event.timestamp <= now) {
+            previewGyro.add(PreviewGyroSample(event.timestamp, values[0].toDouble(), values[1].toDouble(), values[2].toDouble()))
+        }
         if (now - lastUiNs > 500_000_000) {
             lastUiNs = now
             publish()

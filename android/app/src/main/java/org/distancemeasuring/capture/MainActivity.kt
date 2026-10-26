@@ -47,6 +47,8 @@ class MainActivity : ComponentActivity() {
     private var bindingCamera = false
     private var commandPending = false
     private lateinit var previewAnalyzer: PreviewAnalyzer
+    private lateinit var previewProcessor: LivePreviewProcessor
+    private var resumed = false
     private var analysis: ImageAnalysis? = null
     private var analysisMessage = "Preview analysis: preparing"
 
@@ -78,16 +80,19 @@ class MainActivity : ComponentActivity() {
             if (!isDestroyed && state.active && !state.ending && state.path == path) {
                 findViewById<TextView>(R.id.preview_diagnostics).text = message
             }
-        } })
+        } }, process = { frame, path -> previewProcessor.process(frame, path) },
+            closeProcessor = { previewProcessor.close() })
         recorder = CaptureRecorder(this) { update ->
             if (!isDestroyed) {
                 state = update
-                previewAnalyzer.setSession(if (state.active && !state.ending) state.path else null)
+                previewAnalyzer.setSession(if (resumed && !bindingCamera && imageCapture != null &&
+                    analysis != null && state.active && !state.ending) state.path else null)
                 if (!state.active) captureStability?.stop()
                 commandPending = false
                 render()
             }
         }
+        previewProcessor = LivePreviewProcessor(recorder.previewGyro)
         start.setOnClickListener {
             commandPending = true
             render()
@@ -119,6 +124,7 @@ class MainActivity : ComponentActivity() {
     private fun bindCamera(allowPhysicalPin: Boolean = true, allowAnalysis: Boolean = true) {
         if (bindingCamera || imageCapture != null) return
         bindingCamera = true
+        previewAnalyzer.setSession(null)
         cameraMessage = "preparing camera"
         val future = ProcessCameraProvider.getInstance(this)
         future.addListener({
@@ -225,6 +231,15 @@ class MainActivity : ComponentActivity() {
                 imageCapture = bound.photos
                 captureGeometry = bound.geometry
                 analysis = bound.stream
+                val activeArray = characteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
+                previewProcessor.configure(PreviewCameraSettings(
+                    realtimeClock = characteristics.get(CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE) == CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME,
+                    backCamera = characteristics.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK,
+                    sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION),
+                    sensorWidthMm = sensorSize?.width?.toDouble(), sensorHeightMm = sensorSize?.height?.toDouble(),
+                    focalMm = characteristics.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.firstOrNull()?.toDouble(),
+                    activeArray = activeArray?.let { PreviewCrop(it.left, it.top, it.right, it.bottom) },
+                    pinnedCameraId = physicalId ?: if (logical) null else logicalId, frames = bound.geometry.frames))
                 val executor = ContextCompat.getMainExecutor(this)
                 val stability = CaptureStability(bound.camera, characteristics, executor,
                     physicalId?.let { "requested:$it" } ?: if (logical) "unavailable_using_logical_camera" else "single_camera")
@@ -254,6 +269,8 @@ class MainActivity : ComponentActivity() {
                 render()
             } finally {
                 bindingCamera = false
+                previewAnalyzer.setSession(if (resumed && imageCapture != null && analysis != null &&
+                    state.active && !state.ending) state.path else null)
             }
         }, ContextCompat.getMainExecutor(this))
     }
@@ -280,6 +297,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        resumed = true
         // Also recover when camera access was granted from Android Settings.
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) ==
             PackageManager.PERMISSION_GRANTED
@@ -288,6 +306,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onPause() {
         // Backgrounding the prototype closes the timeline; it is never a background service.
+        resumed = false
         previewAnalyzer.setSession(null)
         recorder.end("activity_paused")
         super.onPause()

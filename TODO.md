@@ -557,7 +557,7 @@ coexistence validation remains pending; see [P7 notes](docs/architecture/preview
 
 ## P7.3 Prototype live feature tracking on Android
 
-[ ] Port only the already-validated minimum from P2/P3 needed to maintain tracks and estimate residual parallax on preview frames.
+[~] Port only the already-validated minimum from P2/P3 needed to maintain tracks and estimate residual parallax on preview frames.
 
 Before adding any library, explicitly check whether the current Android dependencies already provide the required operations. If not, document why a new dependency is necessary before adding it.
 
@@ -575,6 +575,14 @@ No polished UI is required.
 **Acceptance**
 
 On a physical phone, the diagnostic values update during motion and a still image can still be captured normally.
+
+Implemented in app 0.4 with bounded native OpenCV Shi–Tomasi/LK, P3-compatible
+gyro integration, approximate crop-aware K, shared keyframe policy and live
+UI/log diagnostics. The OpenCV Android dependency is justified in
+[P7 dependency/validation notes](docs/architecture/preview_tracking.md).
+Both APKs build; 40 JVM and 95 Python tests plus lint pass. Three native device
+tests compile but are unexecuted. No phone is connected, so the required physical
+motion/JPEG/sensor coexistence checks for P7.2/P7.3 remain pending.
 
 ---
 
