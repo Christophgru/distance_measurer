@@ -7,7 +7,6 @@ Points observed in only two images remain eligible. Ruler lengths are not inputs
 from dataclasses import dataclass, replace
 from itertools import combinations
 
-import cv2
 import numpy as np
 
 from distance_measuring.camera import CameraExtrinsics
@@ -15,6 +14,7 @@ from distance_measuring.scene import Observation, Scene, SceneCamera, ScenePoint
 from distance_measuring.scene.model import intrinsics_from_dict
 
 from .overlap import DisconnectedOverlapError, require_connected_overlap
+from .pnp import estimate_pnp
 from .pose import estimate_essential, recover_relative_pose
 from .tracks import MatchEdge, build_tracks
 from .triangulation import triangulate_point
@@ -345,33 +345,16 @@ def rebuild_pairwise_scene(
                 continue
             world = np.array([seed_points[t.track_id] for t in shared])
             pixels = np.array([points[image_id][dict(t.features)[image_id]] for t in shared])
-            # Lecture 002 pp. 81–83: m~K[R|-RC]Pw. PnP fits R and the origin
-            # column O; camera center is C=-R.T O. No IMU or ruler observations.
-            cv2.setRNGSeed(0)
-            ok, rvec, tvec, inliers = cv2.solvePnPRansac(
-                world,
-                pixels,
-                cameras[image_id].K,
-                None,
-                iterationsCount=10000,
-                reprojectionError=3,
-                confidence=0.999,
-                flags=cv2.SOLVEPNP_EPNP,
-            )
-            if not ok or inliers is None or len(inliers) < 8:
+            registration = estimate_pnp(world, pixels, cameras[image_id])
+            if registration.pose is None:
                 continue
-            keep = inliers[:, 0]
-            rvec, tvec = cv2.solvePnPRefineLM(
-                world[keep], pixels[keep], cameras[image_id].K, None, rvec, tvec
-            )
-            rotation = cv2.Rodrigues(rvec)[0]
-            poses[image_id] = CameraExtrinsics(rotation, -rotation.T @ tvec.ravel())
+            poses[image_id] = registration.pose
             registrations.append(
                 {
                     "image_id": image_id,
                     "method": "pnp",
                     "candidates": len(shared),
-                    "inliers": len(keep),
+                    "inliers": int(registration.inliers.sum()),
                 }
             )
             remaining.remove(image_id)

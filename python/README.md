@@ -83,6 +83,40 @@ names to the local lecture without distributing lecture material.
 
 ## Feature matching and rectification
 
+For spatially distributed Shi–Tomasi points, pyramidal LK with forward/backward
+checks, persistent IDs and selective replenishment, see
+[P2 temporal tracking](../docs/architecture/temporal_tracking.md). The command
+exports per-observation history, pair timing and debug images. Its optional
+bounded SIFT initializer supports the large gaps in the still-image baseline;
+ordinary frame tracking uses pure LK by default.
+
+[P3 gyro/parallax analysis](../docs/architecture/gyro_parallax.md) reads those
+saved tracks, reports gyro windows and relative camera-ray rotations, predicts
+rotation-only pixels and ranks tracks using age, response, FB error, residual
+parallax and coverage. Its output includes explicit timing/mounting assumptions;
+pixel residuals are not metric translation or validated pose accuracy.
+
+[P4 tracked bootstrap](../docs/architecture/tracked_bootstrap.md) selects the
+earliest viable P3 pair, reuses calibrated essential/pose/triangulation helpers,
+and saves two cameras plus quality-filtered landmarks in the existing scene
+schema. Run `python python/scripts/bootstrap_tracks.py P3_DIRECTORY --output NEW_DIRECTORY`.
+Its diagnostics explain rejected pairs, thresholds, inlier counts and timing;
+the scene retains arbitrary scale and input quality limitations.
+
+[P5 incremental registration](../docs/architecture/tracked_incremental.md) extends
+the bootstrap using shared PnP, bounded local patches and epipolar descriptor
+corridors. `python python/scripts/extend_tracked_scene.py SESSION P2_DIRECTORY P4_DIRECTORY --output NEW_DIRECTORY`
+saves projection/corridor overlays, correspondence costs, rejected-frame reasons
+and a compatible scene with per-landmark quality. Insufficient support leaves
+later cameras unregistered and returns exit status 1 with a retained scene.
+
+Add `--refine` for [P6 local refinement](../docs/architecture/tracked_refinement.md):
+the existing SciPy BA solver refines a small window with the original gauge,
+then retries guided correspondence for at most two rounds. Landmark confidence
+filters PnP/BA support, and reports separate BA/matching costs and excluded points.
+With refinement enabled, exit 0 also covers accepted BA without a new camera;
+the report distinguishes refinement from registration success.
+
 For a repeatable three-image run through matching, poses, triangulation and BA,
 see the [P0.2 prototype baseline](../docs/experiments/prototype_baseline.md).
 The [implementation reuse map](../docs/architecture/prototype_reuse_map.md)

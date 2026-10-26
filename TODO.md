@@ -150,11 +150,16 @@ A captured sequence reports whether lens, focal length, focus and crop remained 
 
 Goal: obtain stable 2D tracks without exhaustive descriptor matching.
 
+Implemented offline; [command, interfaces, measured results and limitations](docs/architecture/temporal_tracking.md).
+The sparse still-image baseline requires the explicit optional bounded SIFT warp
+initializer; regular frame tracking uses pure LK by default. Baseline coverage is
+48/48 cells, with 100 persistent tracks including 11 spanning images 0/1/2.
+
 Implement this in Python first using the existing OpenCV dependency. Porting it into the Android preview path is a later task in this TODO only after the algorithm works on recorded images/frames.
 
 ## P2.1 Add spatially distributed track points
 
-[ ] Implement a feature-selection function for tracking.
+[x] Implement a feature-selection function for tracking.
 
 First try existing repository extractors/utilities. If no suitable tracker seed selection exists, use OpenCV functionality already available, preferably Shi-Tomasi (`goodFeaturesToTrack`) or an equivalent existing detector.
 
@@ -172,7 +177,7 @@ On the baseline dataset, selected points cover the image instead of collapsing i
 
 ## P2.2 Track points temporally with pyramidal optical flow
 
-[ ] Track the selected points between consecutive images or available preview frames.
+[x] Track the selected points between consecutive images or available preview frames.
 
 Use existing OpenCV functionality if available in the current dependency set, preferably pyramidal Lucas-Kanade.
 
@@ -190,7 +195,7 @@ The baseline sequence produces persistent multi-frame tracks and reports trackin
 
 ## P2.3 Reject unstable optical-flow tracks
 
-[ ] Add a forward/backward consistency check:
+[x] Add a forward/backward consistency check:
 
 1. track image A → B,
 2. track the result B → A,
@@ -204,7 +209,7 @@ Debug output shows accepted/rejected counts and the median forward/backward erro
 
 ## P2.4 Replenish tracks only where needed
 
-[ ] When the active track count falls below a threshold, detect new points only in under-populated grid cells and away from active tracks.
+[x] When the active track count falls below a threshold, detect new points only in under-populated grid cells and away from active tracks.
 
 Do not redetect the whole frame every time if enough tracks remain.
 
@@ -218,9 +223,15 @@ A longer sequence maintains approximately the requested active-track budget with
 
 Goal: distinguish image motion caused mostly by camera rotation from motion that provides translational baseline.
 
+Implemented with the existing gyro integrator/mounting convention; see
+[command, conventions, tests and baseline limitations](docs/architecture/gyro_parallax.md).
+The baseline provides 311/206 gyro samples and 30 ranked tracks per selected pair.
+Its large residuals are explicitly unverified and include timing/mounting/calibration
+uncertainty; no metric translation or scale is estimated.
+
 ## P3.1 Reuse and expose gyro data at image/frame timestamps
 
-[ ] Use the existing sensor/session loader to obtain gyroscope samples around each image timestamp.
+[x] Use the existing sensor/session loader to obtain gyroscope samples around each image timestamp.
 
 If interpolation/integration utilities already exist, reuse them. Otherwise add the minimum gyro integration needed to estimate **relative orientation only** over short intervals.
 
@@ -232,7 +243,7 @@ For each consecutive image pair, output a relative rotation estimate and the num
 
 ## P3.2 Define and test the device-to-camera rotation convention
 
-[ ] Identify the coordinate transform between Android sensor axes and the selected camera axes.
+[x] Identify the coordinate transform between Android sensor axes and the selected camera axes.
 
 Reuse existing coordinate-convention documentation/tests if present.
 
@@ -244,7 +255,7 @@ A known synthetic device rotation predicts the expected image-motion direction.
 
 ## P3.3 Predict rotation-only pixel motion
 
-[ ] Given intrinsics `K` and relative rotation `R`, predict where a tracked pixel would move if the camera only rotated.
+[x] Given intrinsics `K` and relative rotation `R`, predict where a tracked pixel would move if the camera only rotated.
 
 For normalized image ray `x`:
 
@@ -262,7 +273,7 @@ For a rotation-dominated synthetic test, median residual parallax is near zero. 
 
 ## P3.4 Rank tracks by geometric usefulness
 
-[ ] Add a lightweight score for pose initialization using only quantities available before a full 3D reconstruction.
+[x] Add a lightweight score for pose initialization using only quantities available before a full 3D reconstruction.
 
 Start with:
 
@@ -286,7 +297,7 @@ Goal: obtain the first reliable camera pair without exhaustive matching.
 
 ## P4.1 Select a bootstrap pair from tracked parallax
 
-[ ] From the ordered images, choose the earliest pair that has:
+[x] From the ordered images, choose the earliest pair that has:
 
 - enough surviving tracks,
 - sufficient spatial coverage,
@@ -301,7 +312,7 @@ The baseline dataset either selects a pair and explains its score or fails with 
 
 ## P4.2 Estimate the first relative pose
 
-[ ] Feed the selected 2D correspondences into the existing calibrated two-view geometry.
+[x] Feed the selected 2D correspondences into the existing calibrated two-view geometry.
 
 Reuse:
 
@@ -324,7 +335,7 @@ The bootstrap reports:
 
 ## P4.3 Triangulate only strong bootstrap landmarks
 
-[ ] Use the existing triangulation code to initialize a small landmark set.
+[x] Use the existing triangulation code to initialize a small landmark set.
 
 Keep only points satisfying configurable quality gates:
 
@@ -337,6 +348,13 @@ Keep only points satisfying configurable quality gates:
 
 The bootstrap produces a compact 3D landmark set with per-point reprojection error and triangulation angle.
 
+Implemented in `vision/bootstrap.py`, `vision/bootstrap_pipeline.py` and
+`python/scripts/bootstrap_tracks.py`; see [P4 command and results](docs/architecture/tracked_bootstrap.md).
+The fixed baseline rejects 0→1 for coverage and bootstraps 1→2 from 30 tracks:
+22 essential inliers, 15 pose inliers, 11 landmarks, 0.335464 px RMSE.
+Repeat scene geometry/masks are identical. Scale and physical geometry remain
+unverified; no thresholds were relaxed and no dependency was added.
+
 ---
 
 # P5 — Incremental pose estimation and guided correspondence
@@ -345,7 +363,7 @@ Goal: after the first two cameras, stop searching the whole image.
 
 ## P5.1 Add PnP pose estimation using existing OpenCV
 
-[ ] For a new image, collect 2D observations that correspond to already-triangulated 3D landmarks and estimate the new camera pose with PnP + RANSAC.
+[x] For a new image, collect 2D observations that correspond to already-triangulated 3D landmarks and estimate the new camera pose with PnP + RANSAC.
 
 Before implementing, search for an existing PnP helper. If absent, use the OpenCV dependency already present; do not add a new solver library.
 
@@ -357,7 +375,7 @@ A synthetic test recovers a known pose within defined rotation/translation-direc
 
 ## P5.2 Predict landmark positions in the next image
 
-[ ] Project existing 3D landmarks into the next image using the current coarse pose.
+[x] Project existing 3D landmarks into the next image using the current coarse pose.
 
 For each projected landmark store:
 
@@ -374,7 +392,7 @@ Debug visualization overlays projected landmark positions on the new image.
 
 ## P5.3 Implement local descriptor/patch search around projections
 
-[ ] Search for each projected landmark only in a bounded local window instead of the full image.
+[x] Search for each projected landmark only in a bounded local window instead of the full image.
 
 First inspect and reuse the existing feature/descriptor implementation. Prefer using an already-supported descriptor or OpenCV primitive. Do not add SuperPoint, LightGlue or another ML dependency.
 
@@ -391,7 +409,7 @@ Report average candidates examined per landmark and runtime. On the baseline dat
 
 ## P5.4 Add epipolar-guided search for non-landmark features
 
-[ ] For features that do not yet correspond to a 3D landmark, use the current camera poses to restrict matching to an epipolar corridor.
+[x] For features that do not yet correspond to a 3D landmark, use the current camera poses to restrict matching to an epipolar corridor.
 
 Do not rectify the full image for sparse matching.
 
@@ -403,7 +421,7 @@ A debug visualization shows the epipolar corridor and accepted/rejected candidat
 
 ## P5.5 Triangulate newly confirmed tracks
 
-[ ] Extend the scene with new landmarks only after guided correspondences pass geometric checks.
+[x] Extend the scene with new landmarks only after guided correspondences pass geometric checks.
 
 Reuse `[R]` track merging and `[R]` triangulation.
 
@@ -417,6 +435,14 @@ Retain per-landmark quality values:
 
 Adding a camera can also grow the landmark set without rerunning global all-pairs matching.
 
+Implemented with shared OpenCV PnP, existing NCC/SIFT matching, conflict-aware
+tracks and triangulation; see [P5 command, outputs and evidence](docs/architecture/tracked_incremental.md).
+Synthetic sufficient-support tests add cameras and landmarks, including local
+patch recovery without temporal landmarks. The recorded five-image sequence
+grows 11→20 landmarks; seed corridor search compares 1.977 descriptors/query
+instead of 1,200. Later images have no verified 3D–2D support and remain explicitly
+unregistered. Physical geometry/scale remain unverified; no dependency was added.
+
 ---
 
 # P6 — Iterative refinement loop
@@ -425,7 +451,7 @@ Goal: use every improved pose estimate to make the next correspondence search na
 
 ## P6.1 Add local bundle adjustment around the newest camera
 
-[ ] Reuse the existing SciPy bundle-adjustment implementation.
+[x] Reuse the existing SciPy bundle-adjustment implementation.
 
 Adapt it minimally so a local window can refine:
 
@@ -443,7 +469,7 @@ Local BA lowers or preserves reprojection RMSE on the baseline sequence and repo
 
 ## P6.2 Re-run guided correspondence after pose refinement
 
-[ ] After local BA:
+[x] After local BA:
 
 1. reproject landmarks using the refined pose,
 2. reduce the local search radius when uncertainty/reprojection error permits,
@@ -459,7 +485,7 @@ The second guided-search round either adds valid observations/landmarks or exits
 
 ## P6.3 Add point-confidence filtering for pose work
 
-[ ] Compute a simple landmark confidence score from existing geometric diagnostics.
+[x] Compute a simple landmark confidence score from existing geometric diagnostics.
 
 Use only currently available measurements, initially:
 
@@ -475,6 +501,16 @@ Do not implement dense surface reconstruction or interpolation here.
 **Acceptance**
 
 PnP can be run using only landmarks above a configurable confidence threshold, and diagnostics show how many points were excluded.
+
+Implemented with selective variables in the existing SciPy solver,
+`optimization/local_bundle.py`, `vision/refinement.py` and
+`vision/landmark_confidence.py`; enable with `extend_tracked_scene.py --refine`.
+See [P6 command, quality policy and measured results](docs/architecture/tracked_refinement.md).
+The baseline local BA reduces same-set RMSE 0.338839→0.160348 px, adds two
+landmarks through guided retries, and refines the expanded 22-point set
+0.237967→0.172251 px. Two rounds stop when no new guided support appears.
+Original gauge and raw inputs are preserved; later cameras still lack support.
+Confidence thresholds gate both PnP and local BA without an untrusted fallback.
 
 ---
 

@@ -65,12 +65,42 @@ def _metrics(residuals: np.ndarray, loss: str, scale: float) -> dict:
 class _Problem:
     """Gauge-reduced variables in first-baseline units; camera/point IDs stay external."""
 
-    def __init__(self, scene: Scene):
+    def __init__(
+        self,
+        scene: Scene,
+        *,
+        variable_camera_ids=None,
+        variable_point_ids=None,
+        observation_point_ids=None,
+    ):
         if len(scene.cameras) < 2 or not scene.points:
             raise ValueError("Bundle adjustment needs at least two cameras and accepted 3D points")
         self.scene = scene
         self.camera_ids = {camera.image_id: i for i, camera in enumerate(scene.cameras)}
         self.point_ids = {point.point_id: i for i, point in enumerate(scene.points)}
+        selective = any(
+            v is not None for v in (variable_camera_ids, variable_point_ids, observation_point_ids)
+        )
+
+        def selection(values, known, default):
+            values = list(default if values is None else values)
+            if any(type(v) is not int or v not in known for v in values) or len(set(values)) != len(
+                values
+            ):
+                raise ValueError(
+                    "Bundle variable/observation selections must contain unique known IDs"
+                )
+            return set(values)
+
+        variable_cameras = selection(
+            variable_camera_ids, self.camera_ids, list(self.camera_ids)[1:]
+        )
+        if scene.cameras[0].image_id in variable_cameras:
+            raise ValueError("The global first camera must remain fixed")
+        variable_points = selection(variable_point_ids, self.point_ids, self.point_ids)
+        observed_points = selection(observation_point_ids, self.point_ids, self.point_ids)
+        if not variable_points <= observed_points:
+            raise ValueError("Variable landmarks must belong to the selected observation set")
         self.origin = scene.cameras[0].extrinsics.C_w
         self.baseline = float(np.linalg.norm(scene.cameras[1].extrinsics.C_w - self.origin))
         if not np.isfinite(self.baseline) or self.baseline <= 0:
@@ -86,21 +116,28 @@ class _Problem:
         self.basis = np.column_stack((tangent, np.cross(self.direction, tangent)))
         self.camera_slices, initial = {}, []
         for i in range(1, len(scene.cameras)):
+            if scene.cameras[i].image_id not in variable_cameras:
+                continue
             count = 5 if i == 1 else 6
             self.camera_slices[i] = slice(len(initial), len(initial) + count)
             initial.extend([0.0] * 3)
             initial.extend([0.0] * 2 if i == 1 else self.centers[i])
         self.point_start = len(initial)
-        initial.extend(
-            (
-                (np.array([point.position for point in scene.points]) - self.origin) / self.baseline
-            ).ravel()
-        )
+        self.positions = (
+            np.array([p.position for p in scene.points]) - self.origin
+        ) / self.baseline
+        self.point_slices = {}
+        for i, point in enumerate(scene.points):
+            if point.point_id in variable_points:
+                self.point_slices[i] = slice(len(initial), len(initial) + 3)
+                initial.extend(self.positions[i])
+        if not initial:
+            raise ValueError("Bundle adjustment has no free variables")
         self.initial = np.asarray(initial, dtype=float)
         rows, observed = [], []
         graph = {i: set() for i in range(len(scene.cameras))}
         for track in scene.tracks:
-            if track.point_id is None:
+            if track.point_id is None or track.point_id not in observed_points:
                 continue
             views = [self.camera_ids[observation.image_id] for observation in track.observations]
             for a, b in combinations(views, 2):
@@ -115,10 +152,44 @@ class _Problem:
             if current not in reached:
                 reached.add(current)
                 pending.extend(graph[current] - reached)
-        if len(reached) != len(scene.cameras):
+        if not selective and len(reached) != len(scene.cameras):
             raise ValueError(
                 "Accepted observation graph must connect every camera to the fixed camera"
             )
+        if selective:
+            participating = {camera for camera, _ in rows}
+            if not set(self.camera_slices) <= participating:
+                raise ValueError("Every variable camera needs selected landmark observations")
+            # Outside cameras are fixed in the ORIGINAL global frame. Each
+            # variable component needs two fixed centers, the original gauge
+            # pair, or fixed non-collinear 3D anchors to avoid a local scale gauge.
+            unseen = set(participating)
+            while unseen:
+                component, pending = set(), [min(unseen)]
+                while pending:
+                    current = pending.pop()
+                    if current not in component:
+                        component.add(current)
+                        pending.extend(graph[current] - component)
+                unseen -= component
+                fixed = sorted(component - self.camera_slices.keys())
+                two_fixed = any(
+                    np.linalg.norm(self.centers[a] - self.centers[b]) > 1e-12
+                    for a, b in combinations(fixed, 2)
+                )
+                fixed_points = sorted(
+                    {
+                        point
+                        for camera, point in rows
+                        if camera in component and point not in self.point_slices
+                    }
+                )
+                anchors = self.positions[fixed_points]
+                fixed_structure = (
+                    len(anchors) >= 3 and np.linalg.matrix_rank(anchors - anchors.mean(axis=0)) >= 2
+                )
+                if not ({0, 1} <= component or two_fixed or fixed_structure):
+                    raise ValueError("Local observation component lacks global scale/pose anchors")
         if 2 * len(rows) < len(self.initial):
             raise ValueError(
                 "Too few reprojection equations for the gauge-reduced camera/point variables"
@@ -130,10 +201,10 @@ class _Problem:
         self.depth_weight = 10 * float(np.max(self.K[:, :2, :2]))
         pattern = lil_matrix((3 * len(rows), len(initial)), dtype=int)
         for i, (camera, point) in enumerate(rows):
-            if camera:
+            if camera in self.camera_slices:
                 pattern[3 * i : 3 * i + 3, self.camera_slices[camera]] = 1
-            start = self.point_start + 3 * point
-            pattern[3 * i : 3 * i + 3, start : start + 3] = 1
+            if point in self.point_slices:
+                pattern[3 * i : 3 * i + 3, self.point_slices[point]] = 1
         self.sparsity = pattern.tocsr()
 
     def decode(self, parameters):
@@ -155,7 +226,9 @@ class _Problem:
                 )
             else:
                 centers[camera] = values[3:]
-        points = parameters[self.point_start :].reshape(-1, 3)
+        points = self.positions.copy()
+        for point, section in self.point_slices.items():
+            points[point] = parameters[section]
         return rotations, centers, points
 
     def project(self, parameters):
@@ -187,7 +260,14 @@ class BundleResult:
 
 
 def bundle_adjust(
-    scene: Scene, *, loss: str = "soft_l1", f_scale: float = 1.0, max_nfev: int = 300
+    scene: Scene,
+    *,
+    loss: str = "soft_l1",
+    f_scale: float = 1.0,
+    max_nfev: int = 300,
+    variable_camera_ids=None,
+    variable_point_ids=None,
+    observation_point_ids=None,
 ) -> BundleResult:
     if loss not in LOSSES:
         raise ValueError(f"loss must be one of {LOSSES}")
@@ -195,7 +275,12 @@ def bundle_adjust(
         raise ValueError("f_scale must be positive and finite in working pixels")
     if type(max_nfev) is not int or max_nfev < 1:
         raise ValueError("max_nfev must be a positive integer")
-    problem = _Problem(scene)
+    problem = _Problem(
+        scene,
+        variable_camera_ids=variable_camera_ids,
+        variable_point_ids=variable_point_ids,
+        observation_point_ids=observation_point_ids,
+    )
     initial_residuals, initial_depth = problem.project(problem.initial)
     if np.any(initial_depth <= problem.depth_floor):
         raise ValueError("Initial accepted points must lie in front of every observing camera")
@@ -227,11 +312,31 @@ def bundle_adjust(
         and after_candidate["robust_cost"]
         <= before["robust_cost"] + 1e-9 * max(1.0, before["robust_cost"])
     )
+    if accepted:
+        candidate_rotations, candidate_centers, candidate_positions = problem.decode(solved.x)
+        # A selective fit must also keep observations excluded from its objective
+        # forward of their cameras; those points still belong to the saved scene.
+        accepted = all(
+            (
+                candidate_rotations[problem.camera_ids[o.image_id]]
+                @ (
+                    candidate_positions[problem.point_ids[t.point_id]]
+                    - candidate_centers[problem.camera_ids[o.image_id]]
+                )
+            )[2]
+            > problem.depth_floor
+            for t in scene.tracks
+            if t.point_id is not None
+            for o in t.observations
+        )
     chosen = solved.x if accepted else problem.initial
     after = after_candidate if accepted else before
     rotations, centers, positions = problem.decode(chosen)
     cameras = [scene.cameras[0]]
     for i, original in enumerate(scene.cameras[1:], 1):
+        if i not in problem.camera_slices:
+            cameras.append(original)
+            continue
         cameras.append(
             SceneCamera(
                 original.image_id,
@@ -239,22 +344,41 @@ def bundle_adjust(
                 CameraExtrinsics(rotations[i], problem.origin + problem.baseline * centers[i]),
             )
         )
-    final_residuals, _ = problem.project(chosen)
-    errors = np.linalg.norm(final_residuals, axis=1)
-    tracks, cursor = [], 0
+    point_positions = {
+        p.point_id: (problem.origin + problem.baseline * positions[i])
+        if i in problem.point_slices
+        else p.position
+        for i, p in enumerate(scene.points)
+    }
+    camera_by_id = {c.image_id: c for c in cameras}
+    tracks = []
     for track in scene.tracks:
         if track.point_id is None:
             tracks.append(track)
             continue
         observations = tuple(
-            replace(observation, reprojection_error_px=float(errors[cursor + i]))
-            for i, observation in enumerate(track.observations)
+            replace(
+                observation,
+                reprojection_error_px=float(
+                    np.linalg.norm(
+                        camera_by_id[observation.image_id].intrinsics.project(
+                            point_positions[track.point_id],
+                            camera_by_id[observation.image_id].extrinsics,
+                            distort=False,
+                        )
+                        - observation.pixel
+                    )
+                ),
+            )
+            for observation in track.observations
         )
-        cursor += len(observations)
         tracks.append(replace(track, observations=observations))
     points = []
     track_by_point = {track.point_id: track for track in tracks if track.point_id is not None}
     for index, original in enumerate(scene.points):
+        if index not in problem.point_slices:
+            points.append(original)
+            continue
         position = problem.origin + problem.baseline * positions[index]
         views = track_by_point[original.point_id].observations
         rays = np.array(
@@ -303,6 +427,13 @@ def bundle_adjust(
         "input_baseline_convention": scene.metadata.get("baseline_convention"),
         "input_pose_closure": scene.metadata.get("pose_closure"),
         "point_count": len(points),
+        "variable_camera_ids": [scene.cameras[i].image_id for i in problem.camera_slices],
+        "variable_point_ids": [scene.points[i].point_id for i in problem.point_slices],
+        "observation_point_ids": [
+            p.point_id
+            for p in scene.points
+            if p.point_id in {scene.points[i].point_id for _, i in problem.rows}
+        ],
         "rejected_track_count": sum(track.point_id is None for track in tracks),
     }
     metadata = copy.deepcopy(scene.metadata)

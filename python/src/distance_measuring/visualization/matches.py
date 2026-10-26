@@ -15,6 +15,8 @@ def draw_match_diagnostic(
     rectified: bool = False,
     panel_width: int = 800,
     max_lines: int = 60,
+    accepted_label: str = "ACCEPTED by epipolar geometry",
+    rejected_label: str = "REJECTED by epipolar geometry",
 ) -> np.ndarray:
     """Separate accepted/rejected rows; sample only the drawing, never the data."""
     panels, scales = [], []
@@ -41,8 +43,8 @@ def draw_match_diagnostic(
     )
     for row, (mask, label, color) in enumerate(
         (
-            (inliers, "ACCEPTED by epipolar geometry", (70, 235, 70)),
-            (~inliers, "REJECTED by epipolar geometry", (70, 70, 255)),
+            (inliers, accepted_label, (70, 235, 70)),
+            (~inliers, rejected_label, (70, 70, 255)),
         )
     ):
         top = row * (height + header)

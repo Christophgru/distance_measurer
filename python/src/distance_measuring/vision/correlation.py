@@ -72,7 +72,16 @@ def correlate_patch(template, search, *, min_score=0.7, min_margin=0.05, peak_ra
 
 
 def correlate_local_point(
-    first, second, first_pixel, second_pixel, *, homography=None, patch_size=21, search_radius=5
+    first,
+    second,
+    first_pixel,
+    second_pixel,
+    *,
+    homography=None,
+    patch_size=21,
+    search_radius=5,
+    min_score=0.7,
+    min_margin=0.05,
 ):
     """Correlate around an approximate pair match; return a proposed second pixel.
 
@@ -120,12 +129,13 @@ def correlate_local_point(
         cv2.INTER_LINEAR,
     )
     template = cv2.getRectSubPix(first.astype(np.float32), (patch_size, patch_size), tuple(a))
-    peak = correlate_patch(template, search)
+    peak = correlate_patch(template, search, min_score=min_score, min_margin=min_margin)
     result = {
         "accepted": peak.rejection_reason is None,
         "reason": peak.rejection_reason,
         "score": peak.score,
         "peak_margin": peak.peak_margin,
+        "candidates_examined": (2 * search_radius + 1) ** 2,
     }
     if peak.top_left is not None:
         source = origin + np.array(peak.top_left) - search_radius
