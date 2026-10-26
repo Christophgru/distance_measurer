@@ -58,6 +58,30 @@ and [CameraX non-blocking image analysis](https://developer.android.com/media/ca
 
 ## Physical-device status
 
+## P7.2 luminance stream
+
+CameraX `ImageAnalysis` requests 640×480 YUV with keep-only-latest backpressure.
+`PreviewAnalyzer` samples at most ten frames per second only during an active,
+non-ending timeline, copies a bounded unrotated Y image, and closes every
+`ImageProxy` in `finally` before processing the owned copy. Y-plane position,
+row/pixel stride, crop, native dimensions, sample step, rotation metadata and
+camera-frame timestamp are retained. Analysis has its own executor, separate
+from sensor/file/JPEG work; session tokens suppress late UI results.
+
+Binding first measures the existing two-use-case JPEG resolution, then attempts
+the optional analysis use case. If JPEG resolution changes, the combination is
+unsupported, or resolution is unknown, normal JPEG capture is retained without
+analysis. Asynchronous configuration errors first drop analysis, then apply the
+existing physical-camera fallback. Device-specific stream behavior still needs
+the phone checks below.
+
+The debug APK, `lintDebug` and 35 JVM tests pass, including original capture
+tests and Y-plane crop/stride/sampling tests. UI timestamps demonstrate the
+stream interface once a timeline is active; no preview images or extra events
+are written into the recording format.
+
+## Physical-device status
+
 No physical Android device is connected to this workspace (`adb devices -l`
 returns an empty list). P7.3's requirement to observe diagnostics while moving
 a real phone and capture a normal still photo therefore remains pending.

@@ -6,6 +6,7 @@ import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.os.Build
 import android.os.Bundle
+import android.util.Size
 import android.view.Surface
 import android.widget.Button
 import android.widget.TextView
@@ -19,6 +20,7 @@ import androidx.camera.core.Camera
 import androidx.camera.core.CameraState
 import androidx.camera.core.ExperimentalImageCaptureOutputFormat
 import androidx.camera.core.ImageCapture
+import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
@@ -44,6 +46,9 @@ class MainActivity : ComponentActivity() {
     private var cameraMessage = "preparing camera"
     private var bindingCamera = false
     private var commandPending = false
+    private lateinit var previewAnalyzer: PreviewAnalyzer
+    private var analysis: ImageAnalysis? = null
+    private var analysisMessage = "Preview analysis: preparing"
 
     private val permissionRequest = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -69,9 +74,15 @@ class MainActivity : ComponentActivity() {
         start = findViewById(R.id.start)
         capture = findViewById(R.id.capture)
         end = findViewById(R.id.end)
+        previewAnalyzer = PreviewAnalyzer(onUpdate = { path, message -> preview.post {
+            if (!isDestroyed && state.active && !state.ending && state.path == path) {
+                findViewById<TextView>(R.id.preview_diagnostics).text = message
+            }
+        } })
         recorder = CaptureRecorder(this) { update ->
             if (!isDestroyed) {
                 state = update
+                previewAnalyzer.setSession(if (state.active && !state.ending) state.path else null)
                 if (!state.active) captureStability?.stop()
                 commandPending = false
                 render()
@@ -105,7 +116,7 @@ class MainActivity : ComponentActivity() {
     }
 
     @androidx.annotation.OptIn(ExperimentalCamera2Interop::class, ExperimentalImageCaptureOutputFormat::class)
-    private fun bindCamera(allowPhysicalPin: Boolean = true) {
+    private fun bindCamera(allowPhysicalPin: Boolean = true, allowAnalysis: Boolean = true) {
         if (bindingCamera || imageCapture != null) return
         bindingCamera = true
         cameraMessage = "preparing camera"
@@ -136,7 +147,7 @@ class MainActivity : ComponentActivity() {
                         abs(focal - target)
                     } } catch (_: Exception) { null }
                 } else null
-                fun bind(physical: String?): CameraBinding {
+                fun bind(physical: String?, includeAnalysis: Boolean): CameraBinding {
                     val geometry = CaptureGeometry(physical, if (logical) null else logicalId)
                     val previewBuilder = Preview.Builder()
                     val photoBuilder = ImageCapture.Builder()
@@ -146,20 +157,57 @@ class MainActivity : ComponentActivity() {
                     .setResolutionSelector(ResolutionSelector.Builder()
                         .setResolutionStrategy(ResolutionStrategy.HIGHEST_AVAILABLE_STRATEGY)
                         .build())
+                    val analysisBuilder = ImageAnalysis.Builder()
+                        .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
+                        .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                        .setTargetRotation(Surface.ROTATION_0)
+                        .setResolutionSelector(ResolutionSelector.Builder()
+                            .setResolutionStrategy(ResolutionStrategy(Size(640, 480),
+                                ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER)).build())
                     Camera2Interop.Extender(previewBuilder).setSessionCaptureCallback(geometry)
                     if (Build.VERSION.SDK_INT >= 28 && physical != null) {
                         Camera2Interop.Extender(previewBuilder).setPhysicalCameraId(physical)
                         Camera2Interop.Extender(photoBuilder).setPhysicalCameraId(physical)
+                        Camera2Interop.Extender(analysisBuilder).setPhysicalCameraId(physical)
                     }
                     val cameraPreview = previewBuilder.build().also { it.surfaceProvider = preview.surfaceProvider }
                     val photos = photoBuilder.build()
-                    return CameraBinding(provider.bindToLifecycle(this, selector, cameraPreview, photos), photos, geometry)
+                    val stream = if (includeAnalysis) analysisBuilder.build().also {
+                        it.setAnalyzer(previewAnalyzer.executor, previewAnalyzer)
+                    } else null
+                    val useCases = if (stream == null) arrayOf(cameraPreview, photos) else arrayOf(cameraPreview, photos, stream)
+                    return CameraBinding(provider.bindToLifecycle(this, selector, *useCases), photos, geometry, stream)
                 }
-                val bound = try { bind(physicalId) } catch (error: Exception) {
+                fun preserveStillResolution(physical: String?): CameraBinding {
+                    val baseline = bind(physical, false)
+                    val stillSize = baseline.photos.resolutionInfo?.resolution
+                    if (!allowAnalysis || stillSize == null) {
+                        analysisMessage = "Preview analysis unavailable; normal JPEG capture retained"
+                        return baseline
+                    }
+                    provider.unbindAll()
+                    return try {
+                        val combined = bind(physical, true)
+                        if (combined.photos.resolutionInfo?.resolution != stillSize) {
+                            combined.stream?.clearAnalyzer()
+                            provider.unbindAll()
+                            analysisMessage = "Preview analysis disabled to preserve full JPEG resolution"
+                            bind(physical, false)
+                        } else {
+                            analysisMessage = "Preview analysis: ready (processes during an active timeline)"
+                            combined
+                        }
+                    } catch (_: Exception) {
+                        provider.unbindAll()
+                        analysisMessage = "Preview analysis unsupported; normal JPEG capture retained"
+                        bind(physical, false)
+                    }
+                }
+                val bound = try { preserveStillResolution(physicalId) } catch (error: Exception) {
                     if (physicalId == null) throw error
                     provider.unbindAll()
                     physicalId = null
-                    bind(null)
+                    preserveStillResolution(null)
                 }
                 val characteristics = physicalId?.let { manager.getCameraCharacteristics(it) } ?: logicalCharacteristics
                 val sensorSize = characteristics.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)
@@ -176,6 +224,7 @@ class MainActivity : ComponentActivity() {
                             "android_elapsed_realtime_ns" else "camera_unknown")
                 imageCapture = bound.photos
                 captureGeometry = bound.geometry
+                analysis = bound.stream
                 val executor = ContextCompat.getMainExecutor(this)
                 val stability = CaptureStability(bound.camera, characteristics, executor,
                     physicalId?.let { "requested:$it" } ?: if (logical) "unavailable_using_logical_camera" else "single_camera")
@@ -184,12 +233,18 @@ class MainActivity : ComponentActivity() {
                 captureGeometry.onFrame = { frame -> executor.execute {
                     if (captureStability === stability) stability.observe(frame)
                 } }
-                if (physicalId != null) bound.camera.cameraInfo.cameraState.observe(this) { cameraState ->
+                if (physicalId != null || bound.stream != null) bound.camera.cameraInfo.cameraState.observe(this) { cameraState ->
                     if (cameraState.error?.code == CameraState.ERROR_STREAM_CONFIG && imageCapture === bound.photos) {
                         // Some devices reject a physical JPEG stream asynchronously.
                         imageCapture = null
                         captureStability?.stop()
-                        preview.post { provider.unbindAll(); bindCamera(allowPhysicalPin = false) }
+                        analysis?.clearAnalyzer()
+                        preview.post {
+                            provider.unbindAll()
+                            // First drop optional analysis; only then relax physical pinning.
+                            bindCamera(allowPhysicalPin = physicalId != null && bound.stream != null,
+                                allowAnalysis = false)
+                        }
                     }
                 }
                 render()
@@ -203,7 +258,8 @@ class MainActivity : ComponentActivity() {
         }, ContextCompat.getMainExecutor(this))
     }
 
-    private data class CameraBinding(val camera: Camera, val photos: ImageCapture, val geometry: CaptureGeometry)
+    private data class CameraBinding(val camera: Camera, val photos: ImageCapture,
+                                    val geometry: CaptureGeometry, val stream: ImageAnalysis?)
 
     private fun render() {
         val cameraReady = imageCapture != null
@@ -216,6 +272,9 @@ class MainActivity : ComponentActivity() {
             } else state.message
         findViewById<TextView>(R.id.image_count).text = getString(R.string.image_count, state.imageCount)
         findViewById<TextView>(R.id.sensor_count).text = getString(R.string.sensor_count, state.sampleCount)
+        if (!state.active || state.ending || analysis == null) {
+            findViewById<TextView>(R.id.preview_diagnostics).text = analysisMessage
+        }
         findViewById<TextView>(R.id.session_path).text = state.path
     }
 
@@ -229,11 +288,14 @@ class MainActivity : ComponentActivity() {
 
     override fun onPause() {
         // Backgrounding the prototype closes the timeline; it is never a background service.
+        previewAnalyzer.setSession(null)
         recorder.end("activity_paused")
         super.onPause()
     }
 
     override fun onDestroy() {
+        analysis?.clearAnalyzer()
+        previewAnalyzer.close()
         recorder.destroy()
         super.onDestroy()
     }

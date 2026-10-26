@@ -540,7 +540,7 @@ quality warnings remain. See [policy and preview implementation notes](docs/arch
 
 ## P7.2 Expose preview frames from Android capture
 
-[ ] Inspect the current CameraX/Camera2 pipeline and expose a low-resolution luminance image stream suitable for tracking while a session is active.
+[~] Inspect the current CameraX/Camera2 pipeline and expose a low-resolution luminance image stream suitable for tracking while a session is active.
 
 Keep full-resolution JPEG capture unchanged.
 
@@ -549,6 +549,11 @@ Do not add a new Android CV dependency in this task unless repository inspection
 **Acceptance**
 
 The app can process or export timestamped low-resolution preview frames without interrupting sensor recording or still-image capture.
+
+Implemented and build/JVM/lint validated: bounded cropped Y copies on a separate
+CameraX analyzer queue, keep-only-latest frames, active-timeline gating, and a
+fallback that preserves the original JPEG resolution. Physical-device stream
+coexistence validation remains pending; see [P7 notes](docs/architecture/preview_tracking.md).
 
 ## P7.3 Prototype live feature tracking on Android
 

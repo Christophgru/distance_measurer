@@ -6,6 +6,7 @@
     <string name="initial_status">Status: preparing camera</string>
     <string name="image_count">Images: %1$d</string>
     <string name="sensor_count">Sensor samples: %1$d</string>
+    <string name="preview_diagnostics">Preview analysis: inactive</string>
     <string name="camera_permission">Camera access is required. Allow it in Android Settings, then reopen the app.</string>
     <string name="preview_description">Camera preview</string>
     <string name="capture_guidance">Keep the phone still for 2 seconds after Start and before End. Each photo should overlap another photo.</string>
