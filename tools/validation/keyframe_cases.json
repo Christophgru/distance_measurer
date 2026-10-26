@@ -1,0 +1,11 @@
+{
+  "settings": {"min_tracks": 24, "grid_rows": 6, "grid_cols": 8, "min_occupied_cells": 6, "min_parallax_fraction": 0.001875},
+  "cases": [
+    {"name": "supported_translation", "tracks": 75, "source_cells": 10, "target_cells": 13, "parallax_px": 12, "size": [1600, 1200], "rotation_available": true, "candidate": true, "reasons": ["supported_motion_candidate"]},
+    {"name": "threshold_at_preview_resolution", "tracks": 24, "source_cells": 6, "target_cells": 6, "parallax_px": 0.6, "size": [320, 240], "rotation_available": true, "candidate": true, "reasons": ["supported_motion_candidate"]},
+    {"name": "too_few_tracks", "tracks": 23, "source_cells": 6, "target_cells": 6, "parallax_px": 3, "size": [1600, 1200], "rotation_available": true, "candidate": false, "reasons": ["insufficient_tracks"]},
+    {"name": "clustered", "tracks": 36, "source_cells": 5, "target_cells": 4, "parallax_px": 2000, "size": [1600, 1200], "rotation_available": true, "candidate": false, "reasons": ["insufficient_coverage"]},
+    {"name": "pure_rotation", "tracks": 200, "source_cells": 30, "target_cells": 30, "parallax_px": 0.01, "size": [640, 480], "rotation_available": true, "candidate": false, "reasons": ["insufficient_parallax"]},
+    {"name": "rotation_missing", "tracks": 30, "source_cells": 8, "target_cells": 8, "parallax_px": null, "size": [640, 480], "rotation_available": false, "candidate": false, "reasons": ["rotation_unavailable", "parallax_unavailable"]}
+  ]
+}

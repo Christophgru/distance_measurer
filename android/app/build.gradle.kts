@@ -30,3 +30,7 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
 }
+
+tasks.withType<Test>().configureEach {
+    systemProperty("keyframe.cases", rootProject.file("../tools/validation/keyframe_cases.json").absolutePath)
+}

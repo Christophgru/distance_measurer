@@ -117,6 +117,11 @@ filters PnP/BA support, and reports separate BA/matching costs and excluded poin
 With refinement enabled, exit 0 also covers accepted BA without a new camera;
 the report distinguishes refinement from registration success.
 
+[P7 keyframe scoring](../docs/architecture/preview_tracking.md) labels saved P3
+frames with the same track/coverage/parallax policy used by the Android prototype:
+`python python/scripts/score_keyframes.py P3_DIRECTORY --output NEW_DIRECTORY`.
+Candidate labels retain input-quality warnings and still require geometric verification.
+
 For a repeatable three-image run through matching, poses, triangulation and BA,
 see the [P0.2 prototype baseline](../docs/experiments/prototype_baseline.md).
 The [implementation reuse map](../docs/architecture/prototype_reuse_map.md)

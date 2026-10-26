@@ -520,7 +520,7 @@ Do this only after P2–P6 work offline on recorded data.
 
 ## P7.1 Define keyframe criteria from the working offline pipeline
 
-[ ] Convert measured offline behavior into a keyframe score using:
+[x] Convert measured offline behavior into a keyframe score using:
 
 - surviving track count,
 - spatial coverage,
@@ -532,6 +532,11 @@ Avoid adding extra heuristics without evidence from the baseline sequence.
 **Acceptance**
 
 Running the score over a sequence labels frames as `skip` or `candidate keyframe` and prints the reason.
+
+Implemented in `vision/keyframes.py`, `vision/keyframe_pipeline.py` and
+`score_keyframes.py`, with the same Android `KeyframePolicy` and shared parity
+fixtures. The baseline proposes image 2 and explains every skip; original gyro
+quality warnings remain. See [policy and preview implementation notes](docs/architecture/preview_tracking.md).
 
 ## P7.2 Expose preview frames from Android capture
 
