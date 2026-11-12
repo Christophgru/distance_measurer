@@ -1,5 +1,9 @@
 # Hybrid preview replay and still reconstruction (P9.3)
 
+For the full path from a new recording to an exported and running browser UI,
+follow [Run a recording and open the web UI](run_dataset.md). Reconstruction
+alone creates the scene and reports; the HTML export is a separate step.
+
 Run the existing incremental command on a P9 capture:
 
 ```bash

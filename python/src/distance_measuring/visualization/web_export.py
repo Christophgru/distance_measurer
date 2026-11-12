@@ -136,6 +136,12 @@ def browser_payload(scene, source_sha256, *, photos=None, excluded=None):
 
 def export_browser_scene(source, output, *, session_path=None, calibration_path=None):
     source, output = Path(source).resolve(), Path(output).resolve()
+    inputs = [source]
+    if calibration_path is not None:
+        calibration_path = Path(calibration_path).resolve(strict=True)
+        inputs.append(calibration_path)
+    if any(output == p or (output.exists() and p.exists() and output.samefile(p)) for p in inputs):
+        raise ValueError("Browser export must not overwrite its source scene or calibration")
     raw = Path(__file__).resolve().parents[4] / "data/raw"
     if output.is_relative_to(raw) or output.is_relative_to(source.parent):
         raise ValueError("Browser export must be outside raw and the source scene directory")
@@ -146,8 +152,14 @@ def export_browser_scene(source, output, *, session_path=None, calibration_path=
     content = source.read_bytes()
     scene = Scene.from_dict(decode_document(content, source.suffix))
     hashes = {str(source): hashlib.sha256(content).hexdigest()}
+    if calibration_path is not None:
+        hashes[str(calibration_path)] = hashlib.sha256(calibration_path.read_bytes()).hexdigest()
     photos = {}
     if session_path is not None:
+        session_path = Path(session_path).resolve()
+        for name in ("session.json", "events.jsonl"):
+            path = session_path / name
+            hashes[str(path)] = hashlib.sha256(path.read_bytes()).hexdigest()
         session = load_session(session_path)
         if scene.metadata.get("session_id") != session.metadata.session_id:
             raise ValueError("Photos and scene must describe the same recording")
@@ -161,8 +173,12 @@ def export_browser_scene(source, output, *, session_path=None, calibration_path=
             if event is None:
                 raise ValueError(f"Missing recorded photo for camera {camera.image_id}")
             path = session.image_path(event)
-            hashes[str(path.resolve())] = hashlib.sha256(path.read_bytes()).hexdigest()
-            image = cv2.imread(str(path), cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION)
+            photo_content = path.read_bytes()
+            hashes[str(path.resolve())] = hashlib.sha256(photo_content).hexdigest()
+            image = cv2.imdecode(
+                np.frombuffer(photo_content, np.uint8),
+                cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION,
+            )
             original = resolve_intrinsics(event.metadata, calibration_path=calibration_path)
             working, _ = working_camera(original, camera.intrinsics.image_size)
             if not np.allclose(working.K, camera.intrinsics.K, atol=1e-6, rtol=1e-7):
@@ -184,12 +200,6 @@ def export_browser_scene(source, output, *, session_path=None, calibration_path=
                 "exif_orientation": event.metadata.exif_orientation,
                 "time_s": (event.timestamp_ns - session.start_ns) / 1e9,
             }
-        for name in ["session.json", "events.jsonl"]:
-            path = Path(session_path).resolve() / name
-            hashes[str(path)] = hashlib.sha256(path.read_bytes()).hexdigest()
-    if calibration_path:
-        path = Path(calibration_path).resolve()
-        hashes[str(path)] = hashlib.sha256(path.read_bytes()).hexdigest()
     payload = browser_payload(scene, hashes[str(source)], photos=photos)
     payload["input_sha256"] = hashes
     assets = Path(__file__).parent / "web_assets"
@@ -201,10 +211,12 @@ def export_browser_scene(source, output, *, session_path=None, calibration_path=
     document = template.replace("__SCENE_DATA__", data).replace(
         "__VIEWER_SCRIPT__", script.replace("</script", "<\\/script")
     )
+    if output.exists() and any(output.samefile(p) for p in hashes):
+        raise ValueError("Browser export must not overwrite an input file")
     if any(hashlib.sha256(Path(p).read_bytes()).hexdigest() != h for p, h in hashes.items()):
         raise ValueError("A viewer input changed during export")
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(document)
+    output.write_text(document, encoding="utf-8")
     return {
         "output": str(output),
         "points": len(scene.points),

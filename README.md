@@ -1,6 +1,6 @@
 # Distance Measuring
 
-Experimental Android + Python project for reconstructing a small 3D scene from a few phone images and estimating real-world distances.
+Experimental Android + Python project for reconstructing a small 3D scene from phone captures and estimating real-world distances.
 
 The long-term goal is an Android app that lets a user:
 
@@ -13,17 +13,77 @@ The long-term goal is an Android app that lets a user:
    - point-to-point distance,
    - distances in a chosen camera coordinate frame.
 
-The project starts deliberately small:
+The current prototype combines:
 
-- a **minimal Android capture app**,
-- exactly a few images per session (initially three),
+- a **minimal Android capture app** with live 2D feature tracking,
+- continuous low-resolution previews and occasional high-quality photos,
 - a timestamped IMU timeline,
 - an offline **Python reconstruction pipeline**,
 - visualization and measurement on a desktop.
 
 Once the geometry and scale estimation work reliably, the reconstruction code can be moved into or behind a polished Android app.
 
+## Current state and where to resume
+
+App **0.6.1 (9)** uses our own tracking code with CameraX/Camera2 and OpenCV.
+ARCore is withdrawn. Live diagnostics are 2D tracking; live 6-DoF camera pose
+remains planned. The [P9 offline pipeline](docs/architecture/hybrid_replay.md)
+reconstructs cameras and sparse points from the recorded previews and JPEGs.
+
+The October 28 15:27 reference registers **16/16 cameras**, with 2,604 landmarks
+and 1.1597 px reprojection RMSE. The newer 22:56 experiment registers **15/15
+cameras**, with 1,872 landmarks and 1.064 px RMSE, but seven registrations have
+weak PnP support. Neither result establishes physical accuracy or metric scale.
+
+The [offline measurement prototype](docs/architecture/measurement_prototype.md)
+is implemented: review corresponding endpoints in photos, triangulate them,
+set scale from one known length and check other lengths at that fixed scale.
+The current ruler evidence is:
+
+| Check | Default free-3D method | Experimental flat-surface method |
+|---|---|---|
+| Known 5 cm span, two photo pairs | 5.28 / 4.34 cm | 5.21 / 5.20 cm |
+| Known 10 cm reference remeasured from the later pair | 15.14 cm | 10.19 cm |
+| Accuracy status | Unaccepted; inconsistent lengths | Unaccepted; fails unused-view surface support |
+
+The roughly 4% error in the flat-surface example is a conditional result, not
+an established accuracy bound. Both pairs share a camera and the primary scale;
+the 10 cm reference sets that scale in the first pair by definition. See the
+[measurement stability experiment](docs/experiments/p10_measurement_stability.md)
+for the assumptions, sensitivity and independent checks.
+
+**Resume here without a phone:** review saved endpoint annotations in the
+measurement tool, inspect the existing geometry/support diagnostics, and maintain
+the current code and tests. Saved recordings support offline development, but
+cannot replace physical calibration or independent measurement validation.
+
+**When capture is available:** record matching-settings checkerboard calibration
+and a sharp lateral-motion session with a broad flat target and a separately
+measured object. The [calibration intake](docs/architecture/calibration_intake.md)
+is ready. The local [printable target and capture protocol](data/processed/2026-10-28_225648_021_a0d054e8/measurement_stability/capture_kit/README.md)
+are generated artifacts under Git-ignored `data/processed/`.
+
+[TODO.md](TODO.md#p103-add-a-small-measurement-demonstration-with-explicit-scale)
+tracks the remaining acceptance work. Measurement validation remains the priority
+before streaming optimization and Android pose integration.
+
 ## Development setup
+
+For a new recording, follow **[Run a recording and open the web UI](docs/architecture/run_dataset.md)**:
+install Python dependencies, copy and inspect the complete session, reconstruct,
+export the HTML, then start the local HTTP server. It includes the exact commands,
+output paths, exit codes and optional measurement-page setup. Node/npm is only
+needed when developing the renderer.
+
+For an already copied recording, process it and start its viewer with:
+
+```bash
+.venv/bin/python python/scripts/process_session.py data/raw/SESSION_ID --serve
+```
+
+Open <http://localhost:8765/> after processing. Each invocation gets a fresh run
+folder. Omit `--serve` to export only; add `--measurement-reference-m 0.1` to
+prepare endpoint review using a physically known 10 cm reference.
 
 The Python package requires Python 3.12 or newer. See [python/README.md](python/README.md)
 for environment setup, editable installation, tests, and Ruff checks. See
@@ -49,6 +109,11 @@ approximate K:
 python tools/calibration/synthetic_demo.py
 python python/scripts/inspect_camera.py data/raw/measurement01
 ```
+
+For current preview-plus-JPEG recordings, use the
+[one-command hybrid replay](docs/architecture/hybrid_replay.md). The staged
+commands below retain the earlier three-image baseline for inspection and
+comparison.
 
 Extract and verify sparse correspondences, then inspect the rectified match images:
 
@@ -93,7 +158,7 @@ python python/scripts/refine_scene.py data/processed/measurement01/m6/scene.json
 losses, gauge constraints and before/after diagnostics. The result remains in
 arbitrary visual units with unverified calibration/geometry.
 
-Open the latest reconstruction in the GPU browser viewer:
+Open the earlier October 23 dense reconstruction in the GPU browser viewer:
 
 ```bash
 .venv/bin/python -m http.server 8765 --bind 127.0.0.1 \
@@ -101,10 +166,10 @@ Open the latest reconstruction in the GPU browser viewer:
 ```
 
 Open <http://localhost:8765/> to orbit, pan, zoom, inspect cameras and pick
-points. The active workstream separates image-only scene/camera recovery from
-metric scale, which is shelved. The independent reference recovers all eight
+points. This earlier experiment separates image-only scene/camera recovery from
+metric scale. The independent reference recovers all eight
 cameras and allows an orange overlay of the previous three-camera estimate.
-The current model has **1,000,000 points and eight cameras**. Large point lists
+That model has **1,000,000 points and eight cameras**. Large point lists
 use BSON batches and a browser worker; all assets stay local.
 The earlier 20k standalone HTML remains available as `previous_20k.html`.
 See [reference reconstruction and export](docs/architecture/visual_reference.md)
@@ -127,7 +192,8 @@ cover camera colors, ID export and display requirements.
 The [original M9 ruler diagnostic](docs/experiments/m9_ruler_validation.md) failed.
 The [pairwise/acceleration retry](docs/experiments/ruler_pairwise_acceleration_retry.md)
 now passes ruler-reference geometry checks, while acceleration-derived metric
-scale still fails. The measurement engine remains pending.
+scale still fails. These are historical diagnostics; the current endpoint
+measurement prototype is described above, with physical accuracy still unaccepted.
 
 The [2026-10-23 subset retry](docs/experiments/measurement_20261023_091847_subset.md)
 continues with photos 2, 3 and 7 after excluding unsupported views. Camera

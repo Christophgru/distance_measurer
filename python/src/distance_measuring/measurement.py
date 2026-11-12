@@ -25,14 +25,22 @@ def _number(value, name, *, zero=False):
 
 def validate_annotations(scene, data):
     """Validate the editable annotation contract without requiring complete marks."""
-    if data.get("schema_version") != 1 or data.get("coordinate_frame") != COORDINATE_FRAME:
+    if not isinstance(data, dict):
+        raise ValueError("Annotations must be a JSON object")
+    if (
+        type(data.get("schema_version")) is not int
+        or data["schema_version"] != 1
+        or data.get("coordinate_frame") != COORDINATE_FRAME
+    ):
         raise ValueError("Unsupported measurement schema or coordinate frame")
     if not data.get("session_id") or data["session_id"] != scene.metadata.get("session_id"):
         raise ValueError("Annotations and scene must describe the same recording")
     cameras = {str(c.image_id): c for c in scene.cameras}
     sizes = data.get("image_sizes", {})
-    if set(sizes) != set(cameras) or any(
-        list(c.intrinsics.image_size) != sizes[i] for i, c in cameras.items()
+    if (
+        not isinstance(sizes, dict)
+        or set(sizes) != set(cameras)
+        or any(list(c.intrinsics.image_size) != sizes[i] for i, c in cameras.items())
     ):
         raise ValueError("Annotation image sizes must match all scene cameras")
     points = data.get("points")
@@ -56,9 +64,13 @@ def validate_annotations(scene, data):
             if type(observation.get("reviewed")) is not bool:
                 raise ValueError("Every observation needs an explicit reviewed boolean")
     reference = data.get("reference", {})
+    if not isinstance(reference, dict):
+        raise ValueError("Reference must be an interval object")
     _number(reference.get("length_m"), "Reference length_m")
 
     def endpoints(item):
+        if not isinstance(item, dict):
+            raise ValueError("Intervals must be objects with named endpoints")
         pair = item.get("endpoints")
         if (
             not isinstance(pair, list)
@@ -102,6 +114,40 @@ def validate_annotations(scene, data):
             raise ValueError("Duplicate view groups do not establish repeatability")
         seen.add(key)
     _number(data.get("localization_radius_px"), "Localization radius", zero=True)
+
+
+def create_annotations(
+    scene, scene_sha256, reference_length_m, *, view_groups=None, localization_radius_px=1.0
+):
+    """Create editable empty observations; never infer or confirm physical endpoints."""
+    ids = sorted(c.image_id for c in scene.cameras)
+    if len(ids) < 2:
+        raise ValueError("At least two reconstructed cameras are needed")
+    if (
+        not isinstance(scene_sha256, str)
+        or len(scene_sha256) != 64
+        or any(c not in "0123456789abcdef" for c in scene_sha256)
+    ):
+        raise ValueError("Supply the exact source scene SHA-256")
+    groups = (
+        view_groups
+        if view_groups is not None
+        else [ids[:2]] + ([[ids[0], ids[2]]] if len(ids) > 2 else [])
+    )
+    data = {
+        "schema_version": 1,
+        "session_id": scene.metadata.get("session_id"),
+        "scene_sha256": scene_sha256,
+        "coordinate_frame": COORDINATE_FRAME,
+        "image_sizes": {str(c.image_id): list(c.intrinsics.image_size) for c in scene.cameras},
+        "points": {name: {"observations": {}} for name in ("ref_a", "ref_b", "a", "b")},
+        "reference": {"endpoints": ["ref_a", "ref_b"], "length_m": reference_length_m},
+        "measurements": [{"id": "object", "endpoints": ["a", "b"]}],
+        "view_groups": groups,
+        "localization_radius_px": localization_radius_px,
+    }
+    validate_annotations(scene, data)
+    return data
 
 
 def evaluate_measurements(scene, data, *, sensitivity_trials=200):

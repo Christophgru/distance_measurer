@@ -21,13 +21,44 @@ supporting tools.
 
 The package uses a `src/` layout. Subpackages separate dataset loading, camera
 models, computer vision, optimization, IMU processing, scene data, and viewing.
-The dataset package loads and validates captures; later milestones add the
-reconstruction modules. Tests are organized into unit, integration, and synthetic
-geometry suites.
+The dataset package loads and validates captures; the vision and optimization
+packages implement tracking, reconstruction and refinement. Tests are organized
+into unit, integration, and synthetic geometry suites. See the
+[current project state](../README.md#current-state-and-where-to-resume) for the
+measurement results and remaining physical validation.
 
 ## One-command tracked reconstruction
 
-From the repository root, run the P2–P6 prototype with its consolidated P8 report:
+The **[new-dataset walkthrough](../docs/architecture/run_dataset.md)** covers
+session import, inspection, reconstruction, HTML export and starting the local
+web UI, including optional calibration and endpoint annotation.
+
+To inspect, reconstruct, export and serve an already copied recording:
+
+```bash
+python python/scripts/process_session.py data/raw/SESSION_ID --serve
+```
+
+The command prints its fresh run directory, stage reports and viewer URL.
+`--measurement-reference-m LENGTH` also creates blank endpoint annotations and
+their review page; use the actual known length in meters. Omit `--serve` for
+batch processing. Partial geometry remains exit 1 even when its viewer exports.
+
+To run only reconstruction on recordings with saved preview frames, use the
+[P9 hybrid replay](../docs/architecture/hybrid_replay.md) path:
+
+```bash
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 python python/scripts/reconstruct_incremental.py \
+    data/raw/2026-10-28_152754_143_84510fbf \
+    --output data/processed/2026-10-28_152754_143_84510fbf/hybrid_replay_new
+```
+
+Choose a fresh output directory; existing results are never overwritten by this
+command. Automatic tracking-source selection uses the saved previews when
+`tracking.json` is present. The offline scene remains in arbitrary visual units.
+
+For the earlier still-only baseline, run the P2–P6 prototype with its
+consolidated P8 report:
 
 ```bash
 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 python python/scripts/reconstruct_incremental.py \
@@ -87,8 +118,8 @@ inspection reports saved-frame cadence, explicit drops/resets, capture decisions
 and unavailable clocks/intrinsics. See the
 [tracking recording contract](../docs/architecture/tracking_capture_format.md).
 Android export and automatic still capture are implemented in P9.2 (app 0.5.0).
-Reconstruction from the hybrid stream is the subsequent P9.3 task; P8 continues
-to reconstruct the still-image selection. The inspector also reports aggregated
+Reconstruction from the hybrid stream is implemented in P9.3; P8 retains the
+still-image path. The inspector also reports aggregated
 missed/skipped photo ticks from P9.2.
 
 ## Camera model and calibration

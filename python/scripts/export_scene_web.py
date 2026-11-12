@@ -4,6 +4,8 @@ import argparse
 import sys
 from pathlib import Path
 
+import cv2
+
 from distance_measuring.visualization.web_export import export_browser_scene
 
 
@@ -20,7 +22,7 @@ def main(argv=None):
         report = export_browser_scene(
             args.scene, args.output, session_path=args.session, calibration_path=args.calibration
         )
-    except (ValueError, OSError) as error:
+    except (ValueError, OSError, KeyError, TypeError, cv2.error) as error:
         print(f"Cannot export browser viewer: {error}", file=sys.stderr)
         return 2
     print(f"Browser scene: {report['points']} points, {report['cameras']} cameras")

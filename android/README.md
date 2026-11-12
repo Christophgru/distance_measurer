@@ -232,6 +232,9 @@ PY
 The detailed data contract and clock definitions are in
 [capture_format.md](../docs/architecture/capture_format.md).
 
+After copying, follow **[Run a recording and open the web UI](../docs/architecture/run_dataset.md)**
+for inspection, reconstruction, viewer export and starting its local server.
+
 Print per-image settings and observed lens/focal/focus/crop stability with
 `python python/scripts/inspect_session.py data/raw/<session_id>` (add `--json`
 for machine-readable output). Unknown/missing values do not establish stability;

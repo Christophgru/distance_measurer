@@ -1,4 +1,4 @@
-"""Reconstruct an ordered capture through P2–P6 and save one P8 report."""
+"""Reconstruct an ordered preview/JPEG or still-only capture through P2–P6."""
 
 import argparse
 import json

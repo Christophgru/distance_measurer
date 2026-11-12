@@ -1,4 +1,9 @@
-# M8 desktop viewer and point selection
+# Scene viewers and point selection
+
+For a new recording, start with the
+**[dataset-to-web-UI walkthrough](run_dataset.md)**. It covers the current sparse
+reconstruction and export path. Older dense and desktop examples are retained
+below for reproduction.
 
 ## Large point-list files
 
@@ -17,7 +22,7 @@ typed GPU buffers. Those multi-file viewers need a local HTTP server.
 
 ## Interactive browser viewer
 
-The current image-only reference uses local BSON sidecars; follow the
+The earlier dense image-only reference uses local BSON sidecars; follow the
 [reference workflow](visual_reference.md) for that export. The command below
 regenerates the earlier standalone 20k viewer.
 
@@ -32,12 +37,13 @@ export a self-contained Three.js/WebGL viewer:
 ```
 
 Open that HTML file in a WebGL 2 browser. The scene, renderer and optional JPEG
-previews are embedded; no internet connection or server is needed. The latest
+previews are embedded; no internet connection or server is needed. This earlier
 export shows **20,000 image-supported points and cameras 2, 3, 7**: 941 original
 sparse points plus 19,059 stereo samples. It displays the saved reconstruction
 and added stereo measurements, without inventing a surface or repeating points.
 Camera positions and point coordinates remain in **arbitrary reconstruction
-units**. Metric scale work is currently shelved.
+units**. The separate [measurement prototype](measurement_prototype.md) uses
+an explicit known-length reference; physical accuracy remains unaccepted.
 
 Use these controls:
 
@@ -95,7 +101,7 @@ as this three-camera scene, without making a hardware frame-rate claim.
 
 ## More image-supported point samples
 
-The current denser input can be reproduced before the browser export above:
+The earlier 20k input can be reproduced before the browser export above:
 
 ```bash
 .venv/bin/python tools/validation/densify_scene.py \

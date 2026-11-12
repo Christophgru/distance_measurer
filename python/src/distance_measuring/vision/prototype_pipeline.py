@@ -167,7 +167,7 @@ def reconstruct_incremental(
     def run_stage(name, operation):
         nonlocal active_stage
         active_stage = name
-        print(f"P8 stage: {name}", flush=True)
+        print(f"Reconstruction stage: {name}", flush=True)
         stage_start = perf_counter()
         result = operation()
         report["stage_runtime_s"][name] = perf_counter() - stage_start

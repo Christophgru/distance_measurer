@@ -1,5 +1,15 @@
 # Browser reconstruction viewer
 
+## Run the viewer on a new dataset
+
+Follow **[Run a recording and open the web UI](../../docs/architecture/run_dataset.md)**
+for the complete workflow. `process_session.py SESSION --serve` runs inspection,
+reconstruction, viewer export and local serving in one command. Individual stages
+remain available: `reconstruct_incremental.py` creates the scene;
+`export_scene_web.py` creates its `index.html`; `python -m http.server`
+serves that export folder. The committed renderer
+bundle is sufficient for normal use; npm commands below are for development.
+
 The separate lightweight endpoint review page uses plain canvas and no renderer
 bundle. Its exporter and interaction test are documented in the
 [measurement workflow](../../docs/architecture/measurement_prototype.md):
@@ -9,6 +19,8 @@ The Python exporter embeds this renderer, its dependencies and the scene into
 one offline HTML file. Normal use needs a WebGL 2 browser, not Node, a Python
 GUI backend or a running application server. See
 [viewer usage](../../docs/architecture/scene_viewer.md).
+
+## Develop the renderer
 
 Development dependencies are pinned in `package-lock.json`. After changing
 `app.js`, rebuild the committed bundle:
@@ -22,6 +34,8 @@ npm run build
 The output is
 `python/src/distance_measuring/visualization/web_assets/viewer.js`. The exporter
 also includes the MIT license from `THREE-LICENSE.txt` in each HTML artifact.
+After rebuilding, rerun the Python export to include the new renderer in HTML
+that was already generated. Restarting the HTTP server alone does not update it.
 The build also produces `dense_worker.js`, bundling the Apache-licensed BSON
 decoder. Large reference exports copy that worker, its license and bounded BSON
 sidecars beside the HTML; see [visual reference usage](../../docs/architecture/visual_reference.md).

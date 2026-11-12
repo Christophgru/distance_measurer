@@ -5,8 +5,6 @@ import sys
 from pathlib import Path
 
 import numpy as np
-from matplotlib.backends.backend_agg import FigureCanvasAgg
-from matplotlib.figure import Figure
 
 from distance_measuring.scene import Scene
 
@@ -106,6 +104,9 @@ def _equal_bounds(axes, vertices):
 
 
 def save_preview(scene: Scene, view: SceneView, path: Path) -> Path:
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    from matplotlib.figure import Figure
+
     figure = Figure(figsize=(15, 8))
     FigureCanvasAgg(figure)
     for panel in (1, 2):

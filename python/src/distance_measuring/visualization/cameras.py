@@ -3,8 +3,6 @@
 from pathlib import Path
 
 import numpy as np
-from matplotlib.backends.backend_agg import FigureCanvasAgg
-from matplotlib.figure import Figure
 
 from distance_measuring.camera import CameraExtrinsics
 
@@ -12,6 +10,9 @@ from distance_measuring.camera import CameraExtrinsics
 def plot_camera_frames(
     cameras: dict[int, CameraExtrinsics], output: Path, *, quality_note: str | None = None
 ) -> Path:
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    from matplotlib.figure import Figure
+
     figure = Figure(figsize=(10, 8))
     FigureCanvasAgg(figure)
     axes = figure.add_subplot(111, projection="3d")

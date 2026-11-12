@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from distance_measuring.camera import CameraExtrinsics, CameraIntrinsics
-from distance_measuring.measurement import evaluate_measurements
+from distance_measuring.measurement import create_annotations, evaluate_measurements
 from distance_measuring.scene import Scene, SceneCamera
 from distance_measuring.scene.model import COORDINATE_FRAME
 from distance_measuring.visualization.measurement_review import display_rotation
@@ -187,3 +187,36 @@ def test_display_rotation_uses_integer_camera_pixel_centers(orientation, expecte
     point = matrix @ [2, 3, 1]
     np.testing.assert_allclose(point[:2], expected)
     np.testing.assert_allclose(np.linalg.inv(matrix) @ point, [2, 3, 1])
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"schema_version": True},
+        {"image_sizes": None},
+        {"image_sizes": [[1600, 1200]]},
+        {"reference": None},
+        {"reference": []},
+        {"measurements": [None]},
+        {"measurements": [[]]},
+    ],
+)
+def test_malformed_annotation_objects_raise_value_error(measurement_case, change):
+    scene, annotations = measurement_case
+    annotations.update(change)
+    with pytest.raises(ValueError):
+        evaluate_measurements(scene, annotations, sensitivity_trials=20)
+
+
+def test_new_annotations_are_empty_and_do_not_claim_scale_or_accuracy(measurement_case):
+    scene, _ = measurement_case
+    before = deepcopy(scene.to_dict())
+    data = create_annotations(scene, "a" * 64, 0.12)
+    report = evaluate_measurements(scene, data, sensitivity_trials=20)
+    assert data["view_groups"] == [[0, 1], [0, 2]]
+    assert data["reference"]["length_m"] == 0.12
+    assert all(p["observations"] == {} for p in data["points"].values())
+    assert "missing_observations" in report["blocking_reasons"]
+    assert report["fixed_scale_m_per_unit"] is None
+    assert not report["metric_measurement_accepted"]
+    assert scene.to_dict() == before

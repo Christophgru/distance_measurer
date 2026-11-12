@@ -1,8 +1,13 @@
 import hashlib
 import json
+import signal
+import socket
 import subprocess
 import sys
+import time
 from pathlib import Path
+from urllib.error import URLError
+from urllib.request import urlopen
 
 import cv2
 import numpy as np
@@ -14,6 +19,7 @@ from distance_measuring.vision.prototype_pipeline import reconstruct_incremental
 from distance_measuring.vision.tracking import TrackingConfig
 
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts/reconstruct_incremental.py"
+PROCESS_SCRIPT = SCRIPT.with_name("process_session.py")
 
 
 def run(capture, output, *options):
@@ -180,3 +186,201 @@ def test_stage_error_is_saved_with_its_source(capture_factory, tmp_path, monkeyp
     assert report["status"] == "error" and not report["success"]
     assert report["failed_stage"] == "gyro_parallax"
     assert (output / "tracking/tracking.json").exists()
+
+
+@pytest.mark.parametrize("missing_last", [False, True])
+def test_one_command_exports_complete_and_partial_scenes_with_blank_review(
+    capture_factory, tmp_path, missing_last
+):
+    capture, calibration = render(capture_factory, tmp_path, missing_last=missing_last)
+    before = {p: p.read_bytes() for p in capture.path.rglob("*") if p.is_file()}
+    output = tmp_path / "run with spaces"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(PROCESS_SCRIPT),
+            str(capture.path),
+            "--output",
+            str(output),
+            "--calibration",
+            str(calibration),
+            "--initialize-motion",
+            "--max-points",
+            "350",
+            "--measurement-reference-m",
+            "0.1",
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == (1 if missing_last else 0), result.stdout + result.stderr
+    workflow = json.loads((output / "workflow.json").read_text())
+    assert workflow["status"] == ("partial" if missing_last else "complete")
+    assert [s["exit_code"] for s in workflow["stages"]] == [0, int(missing_last), 0, 0]
+    assert all(s["runtime_s"] >= 0 for s in workflow["stages"])
+    assert all((output / s["log_file"]).is_file() for s in workflow["stages"])
+    assert (output / "web/index.html").is_file()
+    assert (output / "web/measurement/index.html").is_file()
+    assert json.loads((output / "inspection.json").read_text())["valid"]
+    annotations = json.loads((output / "measurement/annotations.json").read_text())
+    source = output / "reconstruction/scene.json"
+    assert annotations["scene_sha256"] == hashlib.sha256(source.read_bytes()).hexdigest()
+    assert annotations["reference"]["length_m"] == 0.1
+    assert all(p["observations"] == {} for p in annotations["points"].values())
+    assert not json.loads((output / "measurement/measurements.json").read_text())[
+        "metric_measurement_accepted"
+    ]
+    assert workflow["serve_command"][-1] == str(output / "web")
+    assert "http://localhost:8765/measurement/" in result.stdout
+    assert before == {p: p.read_bytes() for p in before}
+    repeated = subprocess.run(
+        [sys.executable, str(PROCESS_SCRIPT), str(capture.path), "--output", str(output)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert repeated.returncode == 2
+    assert "already exists" in repeated.stderr
+    assert json.loads((output / "workflow.json").read_text()) == workflow
+
+
+def test_one_command_keeps_reports_when_no_geometry_is_supported(capture_factory, tmp_path):
+    capture, calibration = render(capture_factory, tmp_path, blank=True)
+    output = tmp_path / "no geometry"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(PROCESS_SCRIPT),
+            str(capture.path),
+            "--output",
+            str(output),
+            "--calibration",
+            str(calibration),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    report = json.loads((output / "workflow.json").read_text())
+    assert report["status"] == "no_scene"
+    assert [s["name"] for s in report["stages"]] == ["inspection", "reconstruction"]
+    assert report["viewer"] is None
+    assert (output / "reconstruction/REPORT.md").exists()
+    assert not (output / "web").exists()
+    assert "No supported scene:" in result.stderr
+
+
+@pytest.mark.parametrize("malformed", [False, True])
+def test_one_command_stops_on_inspection_errors(capture, tmp_path, malformed):
+    if malformed:
+        (capture.path / "session.json").write_text("[]")
+    else:
+        capture.metadata["sensor_counts"]["accelerometer"] += 1
+        capture.write()
+    output = tmp_path / "invalid"
+    result = subprocess.run(
+        [sys.executable, str(PROCESS_SCRIPT), str(capture.path), "--output", str(output)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == (2 if malformed else 1), result.stdout + result.stderr
+    report = json.loads((output / "workflow.json").read_text())
+    assert report["status"] == "inspection_failed"
+    assert report["failure_reason"]
+    assert len(report["stages"]) == 1
+    assert not (output / "reconstruction").exists()
+
+
+def test_one_command_rejects_output_alias_inside_raw(capture, tmp_path):
+    alias = tmp_path / "raw alias"
+    alias.symlink_to(capture.path, target_is_directory=True)
+    result = subprocess.run(
+        [sys.executable, str(PROCESS_SCRIPT), str(capture.path), "--output", str(alias / "run")],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 2
+    assert "outside data/raw" in result.stderr
+    assert not (capture.path / "run").exists()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX SIGINT test")
+def test_one_command_serves_viewer_and_retains_success_on_ctrl_c(capture_factory, tmp_path):
+    capture, calibration = render(capture_factory, tmp_path)
+    output = tmp_path / "served run"
+    with socket.socket() as reservation:
+        reservation.bind(("127.0.0.1", 0))
+        port = reservation.getsockname()[1]
+    with (tmp_path / "server.log").open("w+") as log:
+        process = subprocess.Popen(
+            [
+                sys.executable,
+                str(PROCESS_SCRIPT),
+                str(capture.path),
+                "--output",
+                str(output),
+                "--calibration",
+                str(calibration),
+                "--initialize-motion",
+                "--max-points",
+                "350",
+                "--serve",
+                "--port",
+                str(port),
+            ],
+            stdout=log,
+            stderr=log,
+        )
+        try:
+            deadline = time.monotonic() + 120
+            while True:
+                try:
+                    with urlopen(f"http://127.0.0.1:{port}/", timeout=1) as response:
+                        assert response.status == 200
+                        assert b'id="scene-data"' in response.read()
+                    break
+                except URLError:
+                    if process.poll() is not None or time.monotonic() >= deadline:
+                        log.seek(0)
+                        pytest.fail(log.read())
+                    time.sleep(0.05)
+            report = json.loads((output / "workflow.json").read_text())
+            assert report["status"] == "complete"
+            assert report["processing_runtime_s"] > 0
+            process.send_signal(signal.SIGINT)
+            assert process.wait(timeout=15) == 0
+            final = json.loads((output / "workflow.json").read_text())
+            assert final["status"] == "complete"
+        finally:
+            if process.poll() is None:
+                process.kill()
+            process.wait(timeout=15)
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        ["--port", "0"],
+        ["--port", "65536"],
+        ["--max-points", "0"],
+        ["--max-image-size", "1"],
+        ["--measurement-reference-m", "nan"],
+        ["--measurement-reference-m", "-1"],
+    ],
+)
+def test_one_command_rejects_invalid_options_before_creating_outputs(capture, tmp_path, options):
+    output = tmp_path / "bad options"
+    result = subprocess.run(
+        [sys.executable, str(PROCESS_SCRIPT), str(capture.path), "--output", str(output), *options],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 2
+    assert "error:" in result.stderr
+    assert not output.exists()

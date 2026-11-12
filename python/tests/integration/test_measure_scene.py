@@ -16,6 +16,7 @@ from distance_measuring.scene.model import COORDINATE_FRAME
 from distance_measuring.vision.pipeline import working_camera
 
 SCRIPT = Path(__file__).resolve().parents[3] / "python/scripts/measure_scene.py"
+INIT_SCRIPT = SCRIPT.with_name("init_measurements.py")
 
 
 @pytest.fixture
@@ -143,4 +144,154 @@ def test_cli_rejects_annotation_from_changed_scene(inputs, tmp_path):
     result = run(source, annotation, "--output", str(output), "--sensitivity-trials", "20")
     assert result.returncode == 2
     assert "SHA-256" in result.stderr
+    assert not output.exists()
+
+
+@pytest.mark.parametrize("target", ["report", "review"])
+@pytest.mark.parametrize("alias", ["direct", "symlink", "hardlink"])
+def test_cli_cannot_overwrite_calibration(inputs, tmp_path, target, alias):
+    source, annotation, raw = inputs
+    calibration = tmp_path / "camera.html"
+    calibration.write_text("input calibration")
+    before = calibration.read_bytes()
+    collision = tmp_path / "alias.html"
+    if alias == "direct":
+        collision = calibration
+    elif alias == "symlink":
+        collision.symlink_to(calibration)
+    else:
+        collision.hardlink_to(calibration)
+    output = collision if target == "report" else tmp_path / "result.json"
+    options = ["--output", str(output), "--calibration", str(calibration)]
+    if target == "review":
+        options += ["--review-html", str(collision), "--session", str(raw)]
+    result = run(source, annotation, *options, "--sensitivity-trials", "20")
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "Outputs must be outside" in result.stderr
+    assert calibration.read_bytes() == before
+    if target == "review":
+        assert not output.exists()
+
+
+@pytest.mark.parametrize("value", [None, [], {"reference": None}, {"measurements": [None]}])
+def test_cli_malformed_annotations_report_an_input_error(inputs, tmp_path, value):
+    source, annotation, _ = inputs
+    if isinstance(value, dict):
+        data = json.loads(annotation.read_text())
+        data.update(value)
+        value = data
+    annotation.write_text(json.dumps(value))
+    output = tmp_path / "result.json"
+    result = run(source, annotation, "--output", str(output), "--sensitivity-trials", "20")
+    assert result.returncode == 2
+    assert "Cannot measure scene:" in result.stderr
+    assert "Traceback" not in result.stderr
+    assert not output.exists()
+
+
+def test_review_outputs_cannot_be_hardlinks_to_each_other(inputs, tmp_path):
+    source, annotation, raw = inputs
+    output, html = tmp_path / "result.json", tmp_path / "review.html"
+    output.write_text("previous output")
+    html.hardlink_to(output)
+    result = run(
+        source,
+        annotation,
+        "--output",
+        str(output),
+        "--review-html",
+        str(html),
+        "--session",
+        str(raw),
+        "--sensitivity-trials",
+        "20",
+    )
+    assert result.returncode == 2
+    assert "Outputs must be outside" in result.stderr
+    assert output.read_text() == "previous output"
+
+
+def test_review_cannot_overwrite_a_raw_photo_through_a_hardlink(inputs, tmp_path):
+    source, annotation, raw = inputs
+    photo = next((raw / "images").glob("*.jpg"))
+    before = photo.read_bytes()
+    html = tmp_path / "review.html"
+    html.hardlink_to(photo)
+    output = tmp_path / "result.json"
+    result = run(
+        source,
+        annotation,
+        "--output",
+        str(output),
+        "--review-html",
+        str(html),
+        "--session",
+        str(raw),
+        "--sensitivity-trials",
+        "20",
+    )
+    assert result.returncode == 2
+    assert "Outputs must be outside" in result.stderr
+    assert photo.read_bytes() == before
+    assert not output.exists()
+
+
+def test_initialize_command_creates_editable_scene_bound_review(inputs, tmp_path):
+    source, _, raw = inputs
+    output = tmp_path / "new measurement"
+    arguments = [
+        sys.executable,
+        str(INIT_SCRIPT),
+        str(source),
+        "--session",
+        str(raw),
+        "--output",
+        str(output),
+        "--reference-length-m",
+        "0.123",
+        "--view-group",
+        "1",
+        "2",
+    ]
+    result = subprocess.run(arguments, capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stdout + result.stderr
+    annotations = json.loads((output / "annotations.json").read_text())
+    assert annotations["scene_sha256"] == hashlib.sha256(source.read_bytes()).hexdigest()
+    assert annotations["reference"]["length_m"] == 0.123
+    assert annotations["view_groups"] == [[1, 2]]
+    assert all(p["observations"] == {} for p in annotations["points"].values())
+    report = json.loads((output / "measurements.json").read_text())
+    assert report["fixed_scale_m_per_unit"] is None
+    assert "missing_observations" in report["blocking_reasons"]
+    assert not report["prototype_checks_passed"]
+    assert (output / "index.html").is_file()
+    before = {p: p.read_bytes() for p in output.iterdir()}
+    result = subprocess.run(arguments, capture_output=True, text=True, check=False)
+    assert result.returncode == 2
+    assert "already exists" in result.stderr
+    assert before == {p: p.read_bytes() for p in before}
+
+
+@pytest.mark.parametrize("length", ["0", "-1", "nan", "inf"])
+def test_initialize_rejects_invalid_reference_before_creating_output(inputs, tmp_path, length):
+    source, _, raw = inputs
+    output = tmp_path / "invalid"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(INIT_SCRIPT),
+            str(source),
+            "--session",
+            str(raw),
+            "--output",
+            str(output),
+            "--reference-length-m",
+            length,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 2
+    assert "positive" in result.stderr
     assert not output.exists()

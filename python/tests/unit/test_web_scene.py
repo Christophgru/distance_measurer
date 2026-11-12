@@ -7,7 +7,10 @@ import numpy as np
 import pytest
 from numpy.testing import assert_allclose
 
-from distance_measuring.scene import save_scene
+from distance_measuring.camera import CameraExtrinsics, resolve_intrinsics, save_intrinsics
+from distance_measuring.dataset import load_session
+from distance_measuring.scene import Scene, SceneCamera, save_scene
+from distance_measuring.visualization import web_export
 from distance_measuring.visualization.scene_view import camera_drawing
 from distance_measuring.visualization.web_export import browser_payload, export_browser_scene
 
@@ -96,3 +99,77 @@ def test_point_ids_are_not_silently_truncated(bundle_scene_factory):
     invalid = replace(scene, points=(point, *scene.points[1:]), tracks=(track, *scene.tracks[1:]))
     with pytest.raises(ValueError, match="never truncated"):
         browser_payload(invalid, "hash")
+
+
+@pytest.mark.parametrize("input_name", ["scene", "calibration"])
+@pytest.mark.parametrize("alias", ["direct", "symlink", "hardlink"])
+def test_browser_export_cannot_overwrite_inputs(tmp_path, bundle_scene_factory, input_name, alias):
+    scene, _, _ = bundle_scene_factory()
+    source = tmp_path / "input/scene.json"
+    save_scene(source, scene)
+    calibration = tmp_path / "camera.html"
+    calibration.write_text("input calibration")
+    protected = source if input_name == "scene" else calibration
+    before = protected.read_bytes()
+    output = tmp_path / "viewer.html"
+    if alias == "direct":
+        output = protected
+    elif alias == "symlink":
+        output.symlink_to(protected)
+    else:
+        output.hardlink_to(protected)
+    with pytest.raises(ValueError, match="outside|overwrite"):
+        export_browser_scene(source, output, calibration_path=calibration)
+    assert protected.read_bytes() == before
+
+
+@pytest.fixture
+def photo_scene(capture, tmp_path):
+    session = load_session(capture.path)
+    cameras = tuple(
+        SceneCamera(
+            e.index,
+            resolve_intrinsics(e.metadata).without_distortion(),
+            CameraExtrinsics(np.eye(3), [e.index, 0, 0]),
+        )
+        for e in session.images
+    )
+    scene = Scene(cameras, (), (), {"session_id": session.metadata.session_id})
+    source = tmp_path / "input/scene.json"
+    save_scene(source, scene)
+    return source, session
+
+
+@pytest.mark.parametrize("changed_input", ["calibration", "session"])
+def test_photo_export_detects_inputs_changed_during_preparation(
+    photo_scene, tmp_path, monkeypatch, changed_input
+):
+    source, session = photo_scene
+    calibration = save_intrinsics(
+        tmp_path / "camera.yaml", resolve_intrinsics(session.images[0].metadata)
+    )
+    changed = calibration if changed_input == "calibration" else session.path / "session.json"
+    load = web_export.load_session
+
+    def mutate(path):
+        changed.write_bytes(changed.read_bytes() + b"\n")
+        return load(path)
+
+    monkeypatch.setattr(web_export, "load_session", mutate)
+    output = tmp_path / "viewer/index.html"
+    with pytest.raises(ValueError, match="input changed"):
+        export_browser_scene(
+            source, output, session_path=session.path, calibration_path=calibration
+        )
+    assert not output.exists()
+
+
+def test_photo_export_cannot_overwrite_raw_photo_through_hardlink(photo_scene, tmp_path):
+    source, session = photo_scene
+    photo = session.image_path(session.images[0])
+    before = photo.read_bytes()
+    output = tmp_path / "viewer.html"
+    output.hardlink_to(photo)
+    with pytest.raises(ValueError, match="overwrite"):
+        export_browser_scene(source, output, session_path=session.path)
+    assert photo.read_bytes() == before

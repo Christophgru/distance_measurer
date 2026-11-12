@@ -26,7 +26,17 @@ observations and 1.1597 px RMSE at 1600-pixel working resolution. The run took
 
 ## Next implementation
 
-First extract a one-frame-at-a-time Python processor from the existing building
+The current priority is the implemented
+[offline measurement prototype](measurement_prototype.md) and its unresolved
+[physical validation](../experiments/p10_measurement_stability.md), as tracked in
+[P10.3](../../TODO.md#p103-add-a-small-measurement-demonstration-with-explicit-scale).
+Calibration intake is ready, but matching physical recordings remain outstanding.
+While capture is unavailable, review saved observations and geometry diagnostics
+and maintain the existing code/tests. This work does not establish physical
+accuracy or close the outstanding phone acceptance checks.
+
+The subsequent streaming stage is to extract a one-frame-at-a-time Python
+processor from the existing building
 blocks. Retain only a bounded active map, keyframes, images and queues. Distinguish
 waiting for useful motion, bootstrap, tracked pose, lost tracking and reset.
 Reject unsupported poses. Keep mapping/refinement budgets explicit and report

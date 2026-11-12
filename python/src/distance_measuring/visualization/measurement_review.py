@@ -34,11 +34,18 @@ def review_document(
     validate_annotations(scene, annotations)
     if annotations.get("scene_sha256") != scene_sha256:
         raise ValueError("Annotations must be bound to this exact scene SHA-256")
+    hashes = {}
+    for name in ("session.json", "events.jsonl"):
+        path = Path(session_path).resolve() / name
+        hashes[str(path)] = hashlib.sha256(path.read_bytes()).hexdigest()
+    if calibration_path:
+        path = Path(calibration_path).resolve()
+        hashes[str(path)] = hashlib.sha256(path.read_bytes()).hexdigest()
     session = load_session(session_path)
     if session.metadata.session_id != annotations["session_id"]:
         raise ValueError("Review photos and annotations describe different recordings")
     events = {e.index: e for e in session.images}
-    photos, hashes = [], {}
+    photos = []
     ids = sorted(set(i for group in annotations["view_groups"] for i in group))
     cameras = {c.image_id: c for c in scene.cameras}
     for i in ids:
@@ -85,12 +92,6 @@ def review_document(
                 "photo": "data:image/jpeg;base64," + base64.b64encode(encoded).decode(),
             }
         )
-    for name in ("session.json", "events.jsonl"):
-        path = Path(session_path).resolve() / name
-        hashes[str(path)] = hashlib.sha256(path.read_bytes()).hexdigest()
-    if calibration_path:
-        path = Path(calibration_path).resolve()
-        hashes[str(path)] = hashlib.sha256(path.read_bytes()).hexdigest()
     payload = {
         "annotations": annotations,
         "photos": photos,

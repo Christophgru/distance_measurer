@@ -49,6 +49,49 @@ The October 28 22:56 recording has a ready-to-open example under
 Its report explicitly fails the prototype checks. Its approximate seed and
 later-view manual candidates are retained separately, with no confirmed marks.
 
+## Start annotations for a new scene
+
+Use the variables from the [dataset walkthrough](run_dataset.md). The following
+creates a scene-bound template with four named endpoints, an initial report and
+the editable photo page. It requires a fresh output directory:
+
+```bash
+MEASURE_DIR="data/processed/$SESSION_ID/measurement_$RUN_NAME"
+.venv/bin/python python/scripts/init_measurements.py "$RECON_DIR/scene.json" \
+  --session "$SESSION_DIR" --reference-length-m 0.1 --output "$MEASURE_DIR"
+```
+
+Supply the physically known reference length in meters; **0.1 is a 10 cm example**.
+Supply the original `--calibration FILE` for calibrated scenes. Open the generated
+`index.html` directly, or serve that folder. `--review-html PATH` chooses a
+separate, unused HTML destination. Select view groups where the same endpoints
+are readable, before comparing length results. The
+default groups use the first two sorted camera IDs, then the first and third
+when available. Override them with repeated `--view-group 0 1 --view-group 0 14`
+using actual retained camera IDs. The first group fixes scale. The generated
+second group shares a camera, so it is not an independent recording.
+Add `expected_length_m` to the object measurement
+only when its length was measured separately; an unknown length stays absent.
+`localization_radius_px` is an assumed working-pixel perturbation radius, not
+measured accuracy. Adjust it to the annotation uncertainty being investigated.
+
+The empty points intentionally report missing observations while the page lets
+you select each point, click the same physical
+endpoint in each chosen photo and confirm reviewed marks. Download the edited
+JSON, then evaluate that downloaded file (replace the annotation path below):
+
+```bash
+.venv/bin/python python/scripts/measure_scene.py \
+  "$RECON_DIR/scene.json" /path/to/measurement_annotations.json \
+  --session "$SESSION_DIR" \
+  --output "$MEASURE_DIR/measurements.json" \
+  --review-html "$MEASURE_DIR/index.html"
+```
+
+Use the original `--calibration FILE` when applicable. The browser does not write
+to the original JSON or recompute the geometry. With only two cameras, repeatability remains
+unavailable. Calibration and physical accuracy checks remain separate.
+
 ## Annotation contract
 
 JSON schema version 1 contains:

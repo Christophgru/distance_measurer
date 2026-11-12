@@ -6,8 +6,11 @@ import json
 import sys
 from pathlib import Path
 
+import cv2
+
 from distance_measuring.measurement import evaluate_measurements
-from distance_measuring.scene import load_scene
+from distance_measuring.scene import Scene
+from distance_measuring.scene.storage import decode_document
 from distance_measuring.visualization.measurement_review import review_document
 
 
@@ -23,30 +26,44 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         source, annotation = args.scene.resolve(), args.annotations.resolve()
+        inputs = [source, annotation]
+        calibration = args.calibration.resolve(strict=True) if args.calibration else None
+        if calibration:
+            inputs.append(calibration)
         raw = Path(__file__).resolve().parents[2] / "data/raw"
         targets = [args.output.resolve()]
         if args.review_html:
             if not args.session or args.review_html.suffix.lower() != ".html":
                 raise ValueError("--review-html needs --session and an .html filename")
             targets.append(args.review_html.resolve())
-        if len(set(targets)) != len(targets) or any(
-            p == annotation
-            or p.is_relative_to(raw)
-            or p.is_relative_to(source.parent)
-            or (args.session and p.is_relative_to(args.session.resolve()))
-            for p in targets
-        ):
-            raise ValueError(
-                "Outputs must be outside raw/source scene directories and input annotations"
-            )
+        for index, target in enumerate(targets):
+            protected = inputs + targets[:index]
+            if (
+                target.is_relative_to(raw)
+                or target.is_relative_to(source.parent)
+                or (args.session and target.is_relative_to(args.session.resolve()))
+                or any(
+                    target == p or (target.exists() and p.exists() and target.samefile(p))
+                    for p in protected
+                )
+            ):
+                raise ValueError(
+                    "Outputs must be outside raw/source scene directories and must not "
+                    "overwrite input annotations, calibration or each other"
+                )
         content = annotation.read_bytes()
         data = json.loads(content)
-        source_hash = hashlib.sha256(source.read_bytes()).hexdigest()
+        if not isinstance(data, dict):
+            raise ValueError("Annotations must be a JSON object")
+        scene_content = source.read_bytes()
+        source_hash = hashlib.sha256(scene_content).hexdigest()
         if data.get("scene_sha256") != source_hash:
             raise ValueError("Annotations are not bound to the supplied scene SHA-256")
-        scene = load_scene(source)
+        scene = Scene.from_dict(decode_document(scene_content, source.suffix))
         report = evaluate_measurements(scene, data, sensitivity_trials=args.sensitivity_trials)
         hashes = {str(source): source_hash, str(annotation): hashlib.sha256(content).hexdigest()}
+        if calibration:
+            hashes[str(calibration)] = hashlib.sha256(calibration.read_bytes()).hexdigest()
         html = None
         if args.review_html:
             html, photo_hashes = review_document(
@@ -55,18 +72,22 @@ def main(argv=None):
                 args.session,
                 source_hash,
                 report=report,
-                calibration_path=args.calibration,
+                calibration_path=calibration,
             )
             hashes.update(photo_hashes)
         report["input_sha256"] = hashes
+        if any(target.exists() and target.samefile(p) for target in targets for p in hashes):
+            raise ValueError("Outputs must be outside input files, including file aliases")
         # Detect input replacement during evaluation/export before publishing.
         if any(hashlib.sha256(Path(p).read_bytes()).hexdigest() != h for p, h in hashes.items()):
             raise ValueError("Measurement input changed during evaluation")
         for p in targets:
             p.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(json.dumps(report, indent=2, allow_nan=False) + "\n")
+        args.output.write_text(
+            json.dumps(report, indent=2, allow_nan=False) + "\n", encoding="utf-8"
+        )
         if html is not None:
-            args.review_html.write_text(html)
+            args.review_html.write_text(html, encoding="utf-8")
         print(f"Measurement report: {args.output}")
         print(
             "Prototype checks: "
@@ -78,7 +99,7 @@ def main(argv=None):
         )
         print("Exploratory lengths only; scene poses and scale are unchanged")
         return 0
-    except (ValueError, OSError, KeyError, TypeError) as error:
+    except (ValueError, OSError, KeyError, TypeError, cv2.error) as error:
         print(f"Cannot measure scene: {error}", file=sys.stderr)
         return 2
 
