@@ -23,6 +23,7 @@ htmlcov/
 .gradle/
 .kotlin/
 /android/local.properties
+/android/.signing/
 
 # Editor and operating-system files.
 .idea/

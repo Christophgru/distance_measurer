@@ -1,5 +1,17 @@
 # Android capture app
 
+App **0.6.1 (code 9)** removes the optional ARCore experiment and its Google Play
+Services for AR dependency. **Start timeline** is the single capture flow, with
+our existing OpenCV-based feature tracking, gyro/parallax/keyframe diagnostics,
+recorded previews, high-quality JPEGs and sensors. The capture format and app
+signing identity are preserved. Full live 6-DoF pose and metric measurement are
+still development work; the current phone diagnostics are 2D tracking estimates.
+See [our streaming-pose direction](../docs/architecture/live_pose.md).
+
+The app 0.6.0 ARCore experiment is withdrawn. Its source snapshot and prior
+evaluation evidence are retained under `data/processed/p10_own_tracking/withdrawn_arcore/`
+and `data/processed/p10_live_pose/` respectively, outside the active build.
+
 One Kotlin Activity uses CameraX to save high-quality JPEGs while recording an
 accelerometer, gyroscope, and optional compass, rotation vector and game rotation
 vector. App 0.2 retains all available streams without fusing them during capture.
@@ -23,7 +35,42 @@ The debug and instrumentation APKs build, **40 JVM tests** and `lintDebug` pass.
 Native instrumentation tests and physical camera coexistence remain pending;
 no phone is connected to the build workspace.
 
+App **0.4.1** keeps the debug signing key in the persistent checkout and offers
+standalone APKs for individual CPU architectures. Capture/tracking algorithms
+are unchanged by this packaging patch. The main app has an explicit launcher
+icon; the separate instrumentation package is labeled **Distance capture tests
+(no launcher)** and is not the app to open on the phone.
+
 ## Build and install
+
+App **0.5.0 (code 6)** implements [P9.2 hybrid capture](../docs/architecture/hybrid_capture.md#p92-implementation-and-use):
+selected low-resolution luminance frames/diagnostics are saved alongside JPEGs
+and sensors. Automatic photos default to every 1 s; choose 0.25–60 s before Start
+or uncheck automatic photos for manual stills. Pixel/control queues are bounded,
+losses are recorded, and End drains export asynchronously. Stream support,
+actual cadence, JPEG interruptions and native execution still need the combined
+phone check. Python hybrid reconstruction is provided by the
+[P9.3 command](../docs/architecture/hybrid_replay.md).
+
+App **0.5.1 (code 7)** fixes foreground End during an in-flight still. Automatic
+requests stop immediately, while analysis continues through JPEG completion and
+until a subsequent preview has entered the bounded writer queue. The tail wait
+after the JPEG settles is limited to 2 s; unavailable streams and background/
+destruction end preview promptly. The original 30 s JPEG watchdog remains.
+Session metadata records the preview-end decision, comparison timestamp and
+whether the photo boundary came from actual exposure or callback. Writer drain
+still determines whether queued frames were successfully saved. End/restart
+behavior on the phone and native instrumentation execution remain P9.4 checks.
+Install artifacts and refinement evidence are in
+`data/processed/2026-10-27_153337_135_48fb0956/refinement_p9/`.
+The clean build passes **64 JVM tests** and Android lint; both main and native-test
+APKs compile. The associated offline refinement passes **908 Python tests**.
+
+P9.1 fixes recorded build provenance: new sessions take `device.app_version` and
+`device.app_version_code` from generated `BuildConfig`, rather than the previous
+hardcoded `0.4.0`. No existing raw session is rewritten. The
+[tracking-frame contract](../docs/architecture/tracking_capture_format.md) is now
+used by the P9.2 writer and periodic-still diagnostics.
 
 Install JDK 17 and the Android SDK (Android Studio's SDK Manager or command-line
 tools), then install these SDK packages:
@@ -51,6 +98,57 @@ from running them and from the physical camera/JPEG checklist.
 On Windows use `gradlew.bat`. The checked-in wrapper pins Gradle 8.11.1 and
 verifies its distribution checksum. First build needs network access to download
 Gradle and Maven dependencies. No Android Studio project generation is required.
+
+### Signing identity and smaller APKs
+
+Debug builds now use `android/.signing/debug.keystore` (ignored by Git). On its
+first use, the build adopts an existing `~/.android/debug.keystore` when present;
+otherwise it generates an initial debug key using JDK `keytool`. The local key
+is never replaced automatically. Keep a backup and restore it when moving to
+another checkout; deleting it or losing the checkout can change signing identity.
+An explicit existing location can be selected with
+`-PcaptureDebugKeystore=/absolute/path/debug.keystore`. This is a development key,
+not a production release-signing setup.
+
+The default build still produces the universal `app-debug.apk`. To also build
+smaller standalone APKs, from `android/` run:
+
+```bash
+./gradlew :app:assembleDebug -PsplitApks=true
+```
+
+Outputs include `app-arm64-v8a-debug.apk`, `app-armeabi-v7a-debug.apk`,
+`app-x86-debug.apk`, `app-x86_64-debug.apk`, and `app-universal-debug.apk` under
+`app/build/outputs/apk/debug/`. Install just the APK matching the phone's ABI;
+these are complete standalone APKs, not a set of configuration splits. On the
+computer connected to the phone, `adb shell getprop ro.product.cpu.abilist`
+reports its supported ABIs. ARM64 phones can use:
+
+```bash
+adb install --no-streaming -r app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
+```
+
+ADB reports an installation failure code when available; an install progress bar
+alone does not identify a Play Protect, transfer, storage, or package failure.
+Keep the phone online if it requests an online security scan. Stable signing and
+smaller APKs do not guarantee Play Protect approval. Distribution beyond local
+development should use a maintained release key and an appropriate testing or
+store distribution channel.
+
+An update requires the same signing identity as the installed app. If ADB reports
+`INSTALL_FAILED_UPDATE_INCOMPATIBLE`, recover the original key where possible.
+Do not uninstall an existing app until its sessions have been copied: uninstalling
+deletes its app-specific recordings. The build cannot recover a lost old key.
+
+The phone app is **Distance capture** (`org.distancemeasuring.capture`). Do not
+install `app-debug-androidTest.apk` as the phone app: that package contains the
+instrumentation runner and deliberately has no launcher activity. If the main
+package is installed but its launcher entry is unavailable, diagnose from the
+connected computer with:
+
+```bash
+adb shell am start -W -n org.distancemeasuring.capture/.MainActivity
+```
 
 ## Capture
 

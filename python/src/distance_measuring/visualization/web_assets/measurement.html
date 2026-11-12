@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Endpoint measurement review</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#111820;color:#e5ecf2;font:15px system-ui,sans-serif}header,aside{padding:16px}h1{font-size:20px;margin:0 0 8px}p{line-height:1.5}button,select,input{font:inherit;margin:4px 4px 4px 0;padding:7px;background:#233341;color:#fff;border:1px solid #516779;border-radius:4px}button:disabled{opacity:.45}label{display:inline-block}main{display:grid;grid-template-columns:minmax(0,1fr) 330px}#viewport{width:100%;height:72vh;min-height:360px;display:block;outline:1px solid #516779;touch-action:none}#coordinates{font-variant-numeric:tabular-nums}#notice{color:#ffd190}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px}#file{max-width:100%}@media(max-width:760px){main{display:block}#viewport{height:60vh}aside{padding-top:0}}.toolbar{padding:8px 16px}.muted{color:#b7c4ce}
+</style></head><body>
+<header><h1>Review measurement endpoints</h1><div id="session"></div>
+<p id="notice">Exploratory measurement. Review the same physical mark in each view. A known reference sets scale; separate endpoints check it.</p></header>
+<div class="toolbar"><label>Photo <select id="image"></select></label><label>Point <select id="point"></select></label>
+<button id="fit">Fit photo</button><button id="center">Zoom to mark</button><button id="zoom-in">Zoom +</button><button id="zoom-out">Zoom −</button></div>
+<main><section><canvas id="viewport" tabindex="0" aria-label="Photo endpoint editor"></canvas>
+<div class="toolbar"><div id="coordinates"></div><button id="review">Confirm this mark</button><button id="remove">Remove this mark</button>
+<p class="muted">Click to place a mark. Drag to pan; scroll to zoom. Focus the photo and use arrow keys for 0.25 working-pixel nudges (Shift: 1 pixel). Editing clears confirmation.</p></div></section>
+<aside><h2 style="font-size:17px">Annotations</h2><div id="progress"></div><button id="download">Download annotations</button>
+<label>Load edited annotations <input type="file" id="file" accept=".json,application/json"></label><div id="error" role="alert"></div>
+<p>Edits stay in this tab until downloaded. Run the Python measurement command with the downloaded JSON to update lengths and repeatability.</p>
+<h2 style="font-size:17px">Exported measurement result</h2><pre id="results"></pre><p class="muted">Pixel perturbations show sensitivity, not confidence bounds. Camera poses and the source scene remain unchanged.</p></aside></main>
+<script type="application/json" id="measurement-data">__MEASUREMENT_DATA__</script>
+<script>__MEASUREMENT_SCRIPT__</script></body></html>

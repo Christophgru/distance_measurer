@@ -37,7 +37,9 @@ class RefinementConfig:
 DEFAULT_REFINEMENT = RefinementConfig()
 
 
-def retry_unmatched_observations(scene, target_id, images, *, config=DEFAULT_GUIDED):
+def retry_unmatched_observations(
+    scene, target_id, images, *, reserved_feature_id=-1, config=DEFAULT_GUIDED
+):
     """Confirm missing landmark observations against an already registered pose."""
     start = perf_counter()
     cameras = {c.image_id: c for c in scene.cameras}
@@ -58,7 +60,10 @@ def retry_unmatched_observations(scene, target_id, images, *, config=DEFAULT_GUI
     occupied = [
         np.asarray(o.pixel) for t in scene.tracks for o in t.observations if o.image_id == target_id
     ]
-    feature_id = max((o.feature_id for t in scene.tracks for o in t.observations), default=-1) + 1
+    feature_id = (
+        max([reserved_feature_id, *(o.feature_id for t in scene.tracks for o in t.observations)])
+        + 1
+    )
     additions = {}
     for row in searches:
         if not row["accepted"]:
@@ -137,7 +142,13 @@ def refine_registered_camera(
             record.update(search_radius_px=smaller, radius_reduced=smaller < radius)
             radius = smaller
         search_config = replace(guided_config, search_radius_px=radius)
-        scene, retry = retry_unmatched_observations(scene, target_id, images, config=search_config)
+        scene, retry = retry_unmatched_observations(
+            scene,
+            target_id,
+            images,
+            reserved_feature_id=reserved_track_id,
+            config=search_config,
+        )
         scene, growth = grow_landmarks(
             scene,
             source_id,

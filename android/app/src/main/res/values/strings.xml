@@ -1,4 +1,8 @@
 <resources>
+    <string name="automatic_photos">Automatic photos while recording</string>
+    <string name="photo_interval">Photo interval in seconds</string>
+    <string name="photo_interval_unit">seconds</string>
+    <string name="invalid_photo_interval">Choose a photo interval between 0.25 and 60 seconds.</string>
     <string name="app_name">Distance capture</string>
     <string name="start_timeline">Start timeline</string>
     <string name="take_picture">Take picture</string>

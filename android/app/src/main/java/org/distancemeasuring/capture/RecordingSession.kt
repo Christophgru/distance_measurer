@@ -23,6 +23,9 @@ data class SensorSample(
 )
 
 data class PhotoTicket(val index: Int, val requestNs: Long, val directory: File) {
+    private val valid = java.util.concurrent.atomic.AtomicBoolean(true)
+    val captureAllowed: Boolean get() = valid.get()
+    internal fun invalidate() { valid.set(false) }
     val filename = "images/image_%03d.jpg".format(java.util.Locale.ROOT, index)
     val file = File(directory, filename)
     // CameraX writes here first; only successful, registered images are published.
@@ -47,6 +50,10 @@ class RecordingSession(
         private set
     val sampleCount: Int get() = sensorCounts.values.sum()
     val hasPendingPhoto: Boolean get() = pending.isNotEmpty()
+    var lastPhotoBoundaryNs: Long? = null
+        private set
+    var lastPhotoBoundarySource: String? = null
+        private set
 
     private val sensorCounts = availability.keys.associateWith { 0 }.toMutableMap()
     private val sensorAvailability = availability.toMutableMap()
@@ -155,11 +162,15 @@ class RecordingSession(
             throw error
         }
         pending.remove(ticket.index)
+        lastPhotoBoundaryNs = if (useFrame) frameNs else callbackNs
+        lastPhotoBoundarySource = if (useFrame) "camera_frame" else "callback"
+        ticket.invalidate()
         imageCount++
         return true
     }
 
     fun failPhoto(ticket: PhotoTicket, message: String) {
+        ticket.invalidate()
         ticket.temporaryFile.delete()
         if (closed || pending.remove(ticket.index) == null) return
         event(JSONObject().put("type", "image_error").put("index", ticket.index)
@@ -167,10 +178,19 @@ class RecordingSession(
     }
 
     fun requestEnd(reason: String) {
-        if (closed || ending) return
+        if (closed) return
+        if (ending && (endReason != "user" || reason == "user")) return
         ending = true
         endReason = reason
         saveMetadata("ending")
+    }
+
+    fun notePreviewEnd(decision: String, lastQueuedPreviewNs: Long?) {
+        metadata.put("preview_end", JSONObject().put("decision", decision)
+            .put("photo_boundary_ns", lastPhotoBoundaryNs ?: JSONObject.NULL)
+            .put("photo_boundary_source", lastPhotoBoundarySource ?: JSONObject.NULL)
+            .put("last_queued_preview_ns", lastQueuedPreviewNs ?: JSONObject.NULL)
+            .put("clock_domain", "android_elapsed_realtime_ns"))
     }
 
     fun finish() {
@@ -195,7 +215,7 @@ class RecordingSession(
     fun abort() {
         if (closed) return
         closed = true
-        pending.values.forEach { it.temporaryFile.delete() }
+        pending.values.forEach { it.invalidate(); it.temporaryFile.delete() }
         pending.clear()
         closeStreams()
     }
@@ -231,18 +251,7 @@ class RecordingSession(
             .put("sensor_counts", JSONObject(sensorCounts.toMap()))
             .put("image_count", imageCount)
             .put("dropped_sensor_samples", droppedSamples)
-        val temporary = File(directory, "session.json.tmp")
-        FileOutputStream(temporary).use { output ->
-            output.write(metadata.toString(2).toByteArray(Charsets.UTF_8))
-            output.fd.sync()
-        }
-        val target = File(directory, "session.json").toPath()
-        try {
-            Files.move(temporary.toPath(), target, StandardCopyOption.ATOMIC_MOVE,
-                StandardCopyOption.REPLACE_EXISTING)
-        } catch (_: AtomicMoveNotSupportedException) {
-            Files.move(temporary.toPath(), target, StandardCopyOption.REPLACE_EXISTING)
-        }
+        writeCaptureJson(File(directory, "session.json"), metadata)
     }
 
     private fun closeStreams() {
@@ -259,5 +268,20 @@ class RecordingSession(
             .withZone(ZoneOffset.UTC)
 
         private fun newSessionId() = "${ID_FORMAT.format(Instant.now())}_${UUID.randomUUID().toString().take(8)}"
+    }
+}
+
+/** Same synced/atomic publication for session and tracking manifests. */
+internal fun writeCaptureJson(target: File, value: JSONObject) {
+    val temporary = File(target.parentFile, target.name + ".tmp")
+    FileOutputStream(temporary).use { output ->
+        output.write(value.toString(2).toByteArray(Charsets.UTF_8))
+        output.fd.sync()
+    }
+    try {
+        Files.move(temporary.toPath(), target.toPath(), StandardCopyOption.ATOMIC_MOVE,
+            StandardCopyOption.REPLACE_EXISTING)
+    } catch (_: AtomicMoveNotSupportedException) {
+        Files.move(temporary.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING)
     }
 }

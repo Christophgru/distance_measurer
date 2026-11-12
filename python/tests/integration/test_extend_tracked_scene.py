@@ -151,6 +151,8 @@ def test_command_adds_a_camera_and_landmarks_without_changing_sources(capture, t
     )
     report = json.loads((output / "incremental.json").read_text())
     assert report["success"] and report["summary"]["camera_count"] == 3
+    assert report["summary"]["all_selected_cameras_registered"]
+    assert report["summary"]["reprojection_rmse_px"] < 1
     assert report["summary"]["added_landmark_count"] >= 5
     assert not report["unregistered_image_indices"]
     scene = load_scene(output / "scene.json")
@@ -176,6 +178,7 @@ def test_no_verified_support_retains_scene_and_reports_failure(capture, tmp_path
     assert result.returncode == 1, result.stdout + result.stderr
     report = json.loads((output / "incremental.json").read_text())
     assert not report["success"] and report["summary"]["added_camera_count"] == 0
+    assert not report["summary"]["all_selected_cameras_registered"]
     assert report["unregistered_image_indices"] == [2]
     assert report["images"][0]["pnp"]["reason"] == "insufficient_3d_2d_correspondences"
     assert len(load_scene(output / "scene.json").cameras) == 2

@@ -104,6 +104,15 @@ try {
   // tests rendering/picking without exporting an image of invented geometry.
   if(source.quality_status!=='synthetic_renderer_capacity_fixture'&&process.env.SCENE_SMOKE_SCREENSHOT!=='0')await page.screenshot({path:path.join(path.dirname(filename),'browser_smoke.png'),timeout:120000,animations:'disabled'});
   const desktop=await state();
+  // Isolate cloud batching from frustums/path/axes: a fixed total-call limit
+  // incorrectly fails valid scenes with many cameras.
+  const cloudDrawCalls=async()=>{
+    for(const id of ['show-cameras','show-path','show-photos','show-axes'])await page.locator(`#${id}`).uncheck();
+    await page.locator('#show-cloud').check();await page.locator('#overview').click();await waitFrame();
+    return (await state()).drawCalls;
+  };
+  const sparseCloudDrawCalls=await cloudDrawCalls();
+  assert.equal(sparseCloudDrawCalls,1,'The reconstructed point cloud must use one draw call');
   const mobile=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,offline:!localOrigin});
   const phone=await mobile.newPage();phone.on('pageerror',e=>failures.push(e.message));
   await phone.goto(sceneUrl);await phone.waitForFunction(()=>window.__reconstructionViewer?.getState().ready&&window.__reconstructionViewer.getState().drawCalls>0,null,{timeout:180000});
@@ -125,7 +134,9 @@ try {
   temp=await fs.mkdtemp(path.join(os.tmpdir(),'reconstruction-renderer-'));
   const bigFile=path.join(temp,'synthetic.html');await fs.writeFile(bigFile,html.replace(jsonPattern,(_,open,_old,close)=>open+JSON.stringify(fixture)+close));
   await page.goto(pathToFileURL(bigFile).href);await page.waitForFunction(()=>window.__reconstructionViewer?.getState().drawCalls>0);await waitFrame();
-  const large=await state();assert.equal(large.pointCount,n);assert(large.drawCalls<30,'Cloud draw calls must not scale with point count');
+  const large=await state();assert.equal(large.pointCount,n);
+  const largeCloudDrawCalls=await cloudDrawCalls();
+  assert.equal(largeCloudDrawCalls,sparseCloudDrawCalls,'Cloud draw calls must not scale with point count');
   assert.deepEqual(network,[]);assert.deepEqual(failures,[]);
-  console.log(JSON.stringify({desktop,synthetic100k:large,orbit:true,pan:true,zoom:true,gpuPicking:true,filters:true,cameraViews:true,mobile:true,offline:true,errors:failures},null,2));
+  console.log(JSON.stringify({desktop,synthetic100k:large,cloudDrawCalls:{reconstructed:sparseCloudDrawCalls,synthetic100k:largeCloudDrawCalls},orbit:true,pan:true,zoom:true,gpuPicking:true,filters:true,cameraViews:true,mobile:true,offline:true,errors:failures},null,2));
 } finally {await browser.close();if(server)await new Promise(resolve=>server.close(resolve));if(temp)await fs.rm(temp,{recursive:true,force:true});}

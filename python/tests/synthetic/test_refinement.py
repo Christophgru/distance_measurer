@@ -92,6 +92,16 @@ def test_perfect_unchanged_scene_exits_early_instead_of_repeating_search():
     )
 
 
+def test_recovered_observations_reserve_future_temporal_feature_ids():
+    scene, images, _ = fixture(perturb=False)
+    result, report = retry_unmatched_observations(
+        scene, 2, images, reserved_feature_id=2000, config=GuidedConfig(search_radius_px=8)
+    )
+    assert report["added_observation_count"] == 5
+    new = [o for t in result.tracks[-5:] for o in t.observations if o.image_id == 2]
+    assert [o.feature_id for o in new] == list(range(2001, 2006))
+
+
 def test_round_limit_and_small_radius_are_respected():
     scene, images, empty = fixture()
     _, report = refine_registered_camera(

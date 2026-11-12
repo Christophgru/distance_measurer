@@ -71,7 +71,27 @@ def correlate_patch(template, search, *, min_score=0.7, min_margin=0.05, peak_ra
     return CorrelationPeak((int(x), int(y)), score, margin, reason)
 
 
-def correlate_local_point(
+def prepare_correlation_image(image):
+    """Own one validated float32 image for reuse throughout a patch-search batch."""
+    image = np.array(image, dtype=np.float32, copy=True)
+    if image.ndim != 2 or not image.size or not np.isfinite(image).all():
+        raise ValueError("Images must be finite nonempty grayscale arrays")
+    image.setflags(write=False)
+    return image
+
+
+def correlate_local_point(first, second, first_pixel, second_pixel, **kwargs):
+    """Validate images once for a single search; batched callers reuse prepared images."""
+    return correlate_prepared_local_point(
+        prepare_correlation_image(first),
+        prepare_correlation_image(second),
+        first_pixel,
+        second_pixel,
+        **kwargs,
+    )
+
+
+def correlate_prepared_local_point(
     first,
     second,
     first_pixel,
@@ -92,9 +112,10 @@ def correlate_local_point(
         raise ValueError("patch_size must be an odd integer >=3")
     if type(search_radius) is not int or search_radius < 1:
         raise ValueError("search_radius must be a positive integer")
-    first, second = [np.asarray(a) for a in (first, second)]
-    if any(a.ndim != 2 or not a.size or not np.isfinite(a).all() for a in (first, second)):
-        raise ValueError("Images must be finite nonempty grayscale arrays")
+    # Only accept the read-only images produced by prepare_correlation_image.
+    # There is deliberately no whole-image scan/copy inside this per-point loop.
+    if any(a.ndim != 2 or a.dtype != np.float32 or a.flags.writeable for a in (first, second)):
+        raise ValueError("Patch batches require prepared read-only float32 images")
     a, b = np.asarray(first_pixel, float), np.asarray(second_pixel, float)
     if a.shape != (2,) or b.shape != (2,) or not np.isfinite([a, b]).all():
         raise ValueError("Points must be finite 2D pixels")
@@ -123,12 +144,12 @@ def correlate_local_point(
     if np.any(pixels < 0) or np.any(pixels >= np.array(second.shape[::-1]) - 1):
         return {"accepted": False, "reason": "search_outside_image"}
     search = cv2.remap(
-        second.astype(np.float32),
+        second,
         pixels[:, 0].reshape(size, size).astype(np.float32),
         pixels[:, 1].reshape(size, size).astype(np.float32),
         cv2.INTER_LINEAR,
     )
-    template = cv2.getRectSubPix(first.astype(np.float32), (patch_size, patch_size), tuple(a))
+    template = cv2.getRectSubPix(first, (patch_size, patch_size), tuple(a))
     peak = correlate_patch(template, search, min_score=min_score, min_margin=min_margin)
     result = {
         "accepted": peak.rejection_reason is None,

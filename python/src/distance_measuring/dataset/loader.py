@@ -2,6 +2,7 @@
 
 import csv
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -23,9 +24,21 @@ def _invalid_constant(value: str) -> None:
     raise ValueError(f"non-finite JSON number {value}")
 
 
+def _finite_float(value: str) -> float:
+    number = float(value)
+    if not math.isfinite(number):
+        _invalid_constant(value)
+    return number
+
+
 def _json(text: str, location: str) -> Any:
     try:
-        return json.loads(text, object_pairs_hook=_unique_object, parse_constant=_invalid_constant)
+        return json.loads(
+            text,
+            object_pairs_hook=_unique_object,
+            parse_constant=_invalid_constant,
+            parse_float=_finite_float,
+        )
     except ValueError as error:
         raise DatasetFormatError(f"{location}: invalid JSON: {error}") from error
 
@@ -71,7 +84,9 @@ def load_session(
         for number, line in enumerate(_read_text(event_path).splitlines(), 1)
         if line.strip()
     )
-    session = Session(root, metadata, tuple(samples), events)
+    from .tracking import load_tracking
+
+    session = Session(root, metadata, tuple(samples), events, tracking=load_tracking(root))
     if validate:
         from .validation import validate_session
 

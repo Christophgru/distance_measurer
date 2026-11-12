@@ -40,6 +40,7 @@ two-camera bootstrap, rather than a resumable P5 checkpoint.
 | `vision/guided.py: fundamental_from_cameras`, `epipolar_search` | Derives `F = K2^-T [t]_x R K1^-1` from registered cameras. Only descriptors within the target epipolar corridor are compared, with the existing descriptor ratio test and optional reverse nearest match in the reverse corridor. No rectification is performed. |
 | `vision/incremental.py: register_camera` | Tries temporal 3D–2D PnP first. Uses that pose, or a coarse prediction after failure, for local patch recovery; verifies the combined evidence with PnP. Only final inliers become observations. Failure returns the original scene without a placeholder pose. |
 | `vision/incremental.py: grow_landmarks`, `with_landmark_quality` | Reuses `MatchEdge`/`build_tracks` and `triangulate_point`. Preserves existing point positions/IDs and the bootstrap gauge, links new observations without conflicting image features, and records per-point observation count, best/median acute ray angle and reprojection errors/RMSE. |
+| `vision/pose_prior.py: tracked_motion_prior` | After failed PnP/local search, reuses P4 calibrated two-view pose estimation on shared P2 tracks. At least three trusted map anchors align its translation magnitude with the existing arbitrary visual scale. This is a search prior; a new camera still needs the original PnP acceptance gates. |
 | `vision/incremental_pipeline.py: extend_tracked_scene` | Loads validated artifacts, caches image/SIFT extraction, writes diagnostics and saves the existing scene schema/headless preview. |
 
 By default, corridor search first enriches the known bootstrap pair. After each
@@ -48,6 +49,31 @@ the new image. `--no-seed-growth` disables the initial enrichment. SIFT is
 extracted once per required registered image; image-wide descriptor pairs are
 never matched. Non-landmark queries are capped and duplicate source locations
 are collapsed before matching.
+
+After a new camera passes PnP, growth also consumes shared accepted P2 tracks,
+using their original feature/track IDs. Positive depth, reprojection and angle
+gates verify these tracks; forward/backward flow alone cannot create a landmark.
+Old rejected tracks require a new view and remain linked to their original
+history. Established landmark observations are committed by PnP, not by this
+growth step. Temporal seed enrichment is left to P4's ranked support and budget.
+
+Verified temporal PnP inliers skip redundant patch searches. If temporal PnP and
+the normal bounded search both fail, the default `--use-two-view-prior` fallback
+estimates relative motion from shared P2 tracks using P4's saved pose settings.
+For a source-frame point X, target ray y and unit translation t,
+`y × (R X + s t) = 0` fits one translation magnitude in existing reconstruction
+units. At least `--min-prior-landmarks 3` trusted anchors must have positive depth
+and predictions within the configured search radius. Missing, degenerate,
+negative-scale or inconsistent support makes the prior unavailable.
+
+This prior only guides another bounded appearance search. A local
+source-frontoparallel plane through each landmark normalizes patch scale and
+orientation using the existing homography correlation helper. It is a patch
+approximation, not surface reconstruction. The search grid/radius is in source
+template pixels under this normalization; its target footprint follows the warp.
+Ambiguity and reverse checks remain enabled, and the final pose still requires
+eight PnP inliers within 3 px at default settings. No camera is created from a
+relative pose or three anchors alone. `--no-use-two-view-prior` disables the retry.
 
 Existing observations within the merge radius anchor feature identities. New
 feature/track IDs are allocated beyond all P2 temporal IDs, preventing collisions
@@ -103,6 +129,11 @@ each required image, and its runtime is reported separately from matching.
   R/center, aligned point IDs/pixels/inlier decisions, projections, patch scores,
   corridor lines/candidate counts/matches, track conflicts, triangulations,
   timings, input hashes and unregistered image IDs.
+- The summary explicitly includes `all_selected_cameras_registered` and final
+  `reprojection_rmse_px`; refinement success alone does not mean a sequence was
+  registered. `two_view_prior` records relative-pose verification, scale anchors,
+  bounded retry costs and final PnP. `image_NNN_two_view_prior.jpg` shows its
+  separate search predictions when available.
 - `image_NNN_projections.jpg`: prediction centers and accepted/rejected local
   windows, with the source of the coarse pose labelled.
 - `pair_AAA_BBB_corridors.jpg`: selected sparse corridor examples including

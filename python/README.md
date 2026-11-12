@@ -25,6 +25,25 @@ The dataset package loads and validates captures; later milestones add the
 reconstruction modules. Tests are organized into unit, integration, and synthetic
 geometry suites.
 
+## One-command tracked reconstruction
+
+From the repository root, run the P2–P6 prototype with its consolidated P8 report:
+
+```bash
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 python python/scripts/reconstruct_incremental.py \
+    data/raw/2026-10-27_115100_304_3ca6165e \
+    --image-indices 0 1 3 4 5 --initialize-motion
+```
+
+Results go to `data/processed/<session>/prototype_incremental_p8/`; `--output`
+chooses a fresh destination. Read `REPORT.md`, `reconstruction.json` and
+`scene.json`. Exit 0 requires every selected camera; exit 1 retains geometric
+failure/partial results; exit 2 indicates an input or processing error. Omit the
+subset option to assess the full capture. The sparse-still SIFT initializer is
+explicitly enabled above; pure LK remains the default. See the
+[command contract](../docs/architecture/incremental_command.md) and
+[measured comparison](../docs/experiments/p8_incremental.md).
+
 ## Inspect a captured session
 
 With the environment active, run from the repository root:
@@ -61,6 +80,16 @@ for warning in report.warnings:
 
 See [dataset_inspection.md](../docs/architecture/dataset_inspection.md) for error
 handling, schema details, and interpretation of diagnostics.
+
+P9.1 also supports optional timestamped preview-frame sidecars through the same
+session loader and inspector. Preview frames remain separate from still images;
+inspection reports saved-frame cadence, explicit drops/resets, capture decisions
+and unavailable clocks/intrinsics. See the
+[tracking recording contract](../docs/architecture/tracking_capture_format.md).
+Android export and automatic still capture are implemented in P9.2 (app 0.5.0).
+Reconstruction from the hybrid stream is the subsequent P9.3 task; P8 continues
+to reconstruct the still-image selection. The inspector also reports aggregated
+missed/skipped photo ticks from P9.2.
 
 ## Camera model and calibration
 
@@ -117,6 +146,14 @@ filters PnP/BA support, and reports separate BA/matching costs and excluded poin
 With refinement enabled, exit 0 also covers accepted BA without a new camera;
 the report distinguishes refinement from registration success.
 
+[P9.3 hybrid replay](../docs/architecture/hybrid_replay.md) uses the same
+`reconstruct_incremental.py SESSION` command for captures with saved tracking
+frames. It carries preview track identities between stills, verifies actual
+JPEG pixels against both exposure-bracketing previews, and runs the existing
+P3–P6 geometry. `--tracking-source stills` explicitly retains direct JPEG
+tracking. Reports distinguish complete, partial and failed geometry and include
+capture cadence, gaps, resets, cross-stream support, runtime and quality.
+
 [P7 keyframe scoring](../docs/architecture/preview_tracking.md) labels saved P3
 frames with the same track/coverage/parallax policy used by the Android prototype:
 `python python/scripts/score_keyframes.py P3_DIRECTORY --output NEW_DIRECTORY`.
@@ -172,6 +209,25 @@ tracks, metadata and M5's scale/quality warnings. Load with
 
 See [usage/schema](../docs/architecture/sparse_reconstruction.md) and
 [math with lecture pages](../docs/math/sparse_reconstruction.md).
+
+## Our streaming-pose direction (P10)
+
+First prototype offline reference-scaled measurements with reviewable endpoints,
+fixed-scale repeatability and localization sensitivity. The new
+`python/scripts/measure_scene.py` command can also export a standalone photo
+annotation page. See [measurement workflow](../docs/architecture/measurement_prototype.md).
+
+The ARCore evaluation is withdrawn. P10 will reuse our P2–P6 geometry and the
+existing P9 previews in a bounded streaming estimator, then move the supported
+pose loop into the Android analyzer. The current offline command and P9 readers
+remain the working reference. No new SDK or recording format is required to
+begin that work on the October 28 capture. Current visual geometry has arbitrary
+scale; metric measurement requires an explicit reference or further sensor
+fusion. See [scope and acceptance](../docs/architecture/live_pose.md).
+
+The old ARCore log inspector, its tests and Android experiment were archived
+under `data/processed/p10_own_tracking/withdrawn_arcore/source/`. They are outside
+the active application and Python package.
 
 ## Bundle adjustment
 

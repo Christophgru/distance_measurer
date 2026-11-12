@@ -2,9 +2,12 @@ package org.distancemeasuring.capture
 
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
+import android.os.SystemClock
 import java.io.Closeable
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.RejectedExecutionException
 
 /** Analysis owns its worker. Sensor callbacks/JPEG saving never run on this queue. */
 class PreviewAnalyzer(
@@ -13,15 +16,25 @@ class PreviewAnalyzer(
         "Preview Y: ${frame.width}×${frame.height}; timestamp: ${frame.timestampNs} ns"
     },
     private val closeProcessor: () -> Unit = {},
+    private val flushProcessor: (String) -> Unit = {},
 ) : ImageAnalysis.Analyzer, Closeable {
     val executor = Executors.newSingleThreadExecutor { task -> Thread(task, "preview-analysis") }
     private val session = AtomicReference<String?>(null)
     private var previousSession: String? = null
     private var lastTimestamp = -1L
+    private val closed = AtomicBoolean(false)
 
     fun setSession(path: String?) { session.set(path) }
 
+    fun stopSession(path: String, onStopped: () -> Unit) {
+        session.compareAndSet(path, null)
+        try {
+            executor.execute { try { flushProcessor(path) } finally { onStopped() } }
+        } catch (_: RejectedExecutionException) { onStopped() }
+    }
+
     override fun analyze(image: ImageProxy) {
+        val receivedNs = SystemClock.elapsedRealtimeNanos()
         val token = session.get()
         var copied: PreviewLuma? = null
         try {
@@ -34,7 +47,7 @@ class PreviewAnalyzer(
                     val crop = image.cropRect
                     copied = PreviewLumaSampler.copy(plane.buffer, image.width, image.height,
                         plane.rowStride, plane.pixelStride, crop.left, crop.top, crop.width(), crop.height(),
-                        timestamp, image.imageInfo.rotationDegrees)
+                        timestamp, image.imageInfo.rotationDegrees).copy(receivedTimestampNs = receivedNs)
                     lastTimestamp = timestamp
                 }
             }
@@ -55,6 +68,7 @@ class PreviewAnalyzer(
     }
 
     override fun close() {
+        if (!closed.compareAndSet(false, true)) return
         session.set(null)
         executor.execute(closeProcessor)
         executor.shutdown()

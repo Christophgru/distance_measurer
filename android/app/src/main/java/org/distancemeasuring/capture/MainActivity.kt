@@ -10,6 +10,9 @@ import android.util.Size
 import android.view.Surface
 import android.widget.Button
 import android.widget.TextView
+import android.widget.CheckBox
+import android.widget.EditText
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.camera2.interop.Camera2CameraInfo
@@ -31,6 +34,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import org.json.JSONObject
 import kotlin.math.abs
+import kotlin.math.roundToLong
 
 class MainActivity : ComponentActivity() {
     private lateinit var recorder: CaptureRecorder
@@ -77,38 +81,47 @@ class MainActivity : ComponentActivity() {
         capture = findViewById(R.id.capture)
         end = findViewById(R.id.end)
         previewAnalyzer = PreviewAnalyzer(onUpdate = { path, message -> preview.post {
-            if (!isDestroyed && state.active && !state.ending && state.path == path) {
+            if (!isDestroyed && state.acceptsPreview && state.path == path) {
                 findViewById<TextView>(R.id.preview_diagnostics).text = message
             }
         } }, process = { frame, path -> previewProcessor.process(frame, path) },
-            closeProcessor = { previewProcessor.close() })
-        recorder = CaptureRecorder(this) { update ->
+            closeProcessor = { previewProcessor.close() },
+            flushProcessor = { path -> previewProcessor.flush(path) })
+        recorder = CaptureRecorder(this,
+            requestAutomatic = { path, scheduledNs -> requestPhoto(path, scheduledNs) },
+            stopPreview = { path, done -> previewAnalyzer.stopSession(path, done) },
+            closePreview = { previewAnalyzer.close() }) { update ->
             if (!isDestroyed) {
                 state = update
                 previewAnalyzer.setSession(if (resumed && !bindingCamera && imageCapture != null &&
-                    analysis != null && state.active && !state.ending) state.path else null)
+                    analysis != null && state.acceptsPreview) state.path else null)
                 if (!state.active) captureStability?.stop()
                 commandPending = false
                 render()
             }
         }
-        previewProcessor = LivePreviewProcessor(recorder.previewGyro)
+        previewProcessor = LivePreviewProcessor(recorder.previewGyro,
+            onExport = { path, value -> recorder.offerPreview(path, value) })
         start.setOnClickListener {
+            val config = try {
+                val automatic = findViewById<CheckBox>(R.id.automatic_photos).isChecked
+                val seconds = if (automatic)
+                    findViewById<EditText>(R.id.photo_interval).text.toString().toDouble() else 1.0
+                require(seconds.isFinite() && seconds in .25..60.0)
+                HybridCaptureConfig(automatic, (seconds * 1000).roundToLong())
+            } catch (_: IllegalArgumentException) {
+                Toast.makeText(this, R.string.invalid_photo_interval, Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
             commandPending = true
             render()
             captureStability?.start()
-            recorder.start()
+            recorder.start(config)
         }
         capture.setOnClickListener {
-            imageCapture?.let { camera ->
-                commandPending = true
-                render()
-                val metadata = JSONObject(cameraMetadata.toString())
-                    .put("capture_stability", captureStability?.snapshot() ?: JSONObject.NULL)
-                recorder.takePhoto(camera, metadata,
-                    preview.display?.rotation ?: Surface.ROTATION_0, captureGeometry)
-            }
+            requestPhoto()
         }
+        findViewById<CheckBox>(R.id.automatic_photos).setOnCheckedChangeListener { _, _ -> render() }
         end.setOnClickListener {
             commandPending = true
             render()
@@ -120,10 +133,24 @@ class MainActivity : ComponentActivity() {
         ) bindCamera() else permissionRequest.launch(Manifest.permission.CAMERA)
     }
 
+    private fun requestPhoto(path: String? = null, scheduledNs: Long? = null) {
+        val camera = imageCapture
+        if (camera == null || (path != null && (!resumed || state.path != path || !state.active || state.ending))) {
+            if (path != null && scheduledNs != null) recorder.skipAutomatic(path, scheduledNs, "camera_unavailable")
+            return
+        }
+        if (path == null) { commandPending = true; render() }
+        val metadata = JSONObject(cameraMetadata.toString())
+            .put("capture_stability", captureStability?.snapshot() ?: JSONObject.NULL)
+        recorder.takePhoto(camera, metadata, preview.display?.rotation ?: Surface.ROTATION_0,
+            captureGeometry, path, scheduledNs)
+    }
+
     @androidx.annotation.OptIn(ExperimentalCamera2Interop::class, ExperimentalImageCaptureOutputFormat::class)
     private fun bindCamera(allowPhysicalPin: Boolean = true, allowAnalysis: Boolean = true) {
         if (bindingCamera || imageCapture != null) return
         bindingCamera = true
+        recorder.setCameraAvailability(false, false, "camera_rebinding")
         previewAnalyzer.setSession(null)
         cameraMessage = "preparing camera"
         val future = ProcessCameraProvider.getInstance(this)
@@ -239,7 +266,9 @@ class MainActivity : ComponentActivity() {
                     sensorWidthMm = sensorSize?.width?.toDouble(), sensorHeightMm = sensorSize?.height?.toDouble(),
                     focalMm = characteristics.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.firstOrNull()?.toDouble(),
                     activeArray = activeArray?.let { PreviewCrop(it.left, it.top, it.right, it.bottom) },
-                    pinnedCameraId = physicalId ?: if (logical) null else logicalId, frames = bound.geometry.frames))
+                    pinnedCameraId = physicalId ?: if (logical) null else logicalId,
+                    frames = bound.geometry.frames, cameraId = logicalId))
+                recorder.setCameraAvailability(true, bound.stream != null, "analysis_stream_unsupported_preserving_jpeg")
                 val executor = ContextCompat.getMainExecutor(this)
                 val stability = CaptureStability(bound.camera, characteristics, executor,
                     physicalId?.let { "requested:$it" } ?: if (logical) "unavailable_using_logical_camera" else "single_camera")
@@ -252,6 +281,7 @@ class MainActivity : ComponentActivity() {
                     if (cameraState.error?.code == CameraState.ERROR_STREAM_CONFIG && imageCapture === bound.photos) {
                         // Some devices reject a physical JPEG stream asynchronously.
                         imageCapture = null
+                        recorder.setCameraAvailability(false, false, "camera_stream_reconfiguration")
                         captureStability?.stop()
                         analysis?.clearAnalyzer()
                         preview.post {
@@ -265,12 +295,13 @@ class MainActivity : ComponentActivity() {
                 render()
             } catch (error: Exception) {
                 imageCapture = null
+                recorder.setCameraAvailability(false, false, "camera_unavailable")
                 cameraMessage = "Camera unavailable: ${error.message}"
                 render()
             } finally {
                 bindingCamera = false
                 previewAnalyzer.setSession(if (resumed && imageCapture != null && analysis != null &&
-                    state.active && !state.ending) state.path else null)
+                    state.acceptsPreview) state.path else null)
             }
         }, ContextCompat.getMainExecutor(this))
     }
@@ -283,13 +314,17 @@ class MainActivity : ComponentActivity() {
         start.isEnabled = cameraReady && state.canStart && !commandPending
         capture.isEnabled = cameraReady && state.canTakePhoto && !commandPending
         end.isEnabled = state.canEnd && !commandPending
+        findViewById<CheckBox>(R.id.automatic_photos).isEnabled = !state.active && !commandPending
+        findViewById<EditText>(R.id.photo_interval).isEnabled = !state.active && !commandPending &&
+            findViewById<CheckBox>(R.id.automatic_photos).isChecked
+        findViewById<TextView>(R.id.tracking_status).text = state.trackingMessage
         findViewById<TextView>(R.id.status).text = "Status: " +
             if (!cameraReady) cameraMessage else if (state.capturing && !state.ending) {
                 "recording — taking picture"
             } else state.message
         findViewById<TextView>(R.id.image_count).text = getString(R.string.image_count, state.imageCount)
         findViewById<TextView>(R.id.sensor_count).text = getString(R.string.sensor_count, state.sampleCount)
-        if (!state.active || state.ending || analysis == null) {
+        if (!state.acceptsPreview || analysis == null) {
             findViewById<TextView>(R.id.preview_diagnostics).text = analysisMessage
         }
         findViewById<TextView>(R.id.session_path).text = state.path
@@ -298,6 +333,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         resumed = true
+        commandPending = false
         // Also recover when camera access was granted from Android Settings.
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) ==
             PackageManager.PERMISSION_GRANTED
@@ -314,7 +350,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         analysis?.clearAnalyzer()
-        previewAnalyzer.close()
         recorder.destroy()
         super.onDestroy()
     }

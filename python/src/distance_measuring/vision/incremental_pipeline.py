@@ -10,13 +10,14 @@ import cv2
 import numpy as np
 
 from distance_measuring.dataset import load_session, validate_session
-from distance_measuring.optimization.local_bundle import DEFAULT_LOCAL_BUNDLE
+from distance_measuring.optimization.local_bundle import DEFAULT_LOCAL_BUNDLE, scene_rmse
 from distance_measuring.scene import load_scene, save_scene
 from distance_measuring.scene.model import COORDINATE_FRAME, intrinsics_from_dict
 from distance_measuring.visualization.guided import draw_corridors, draw_projections
 from distance_measuring.visualization.scene_view import build_scene_view
 from distance_measuring.visualization.viewer import save_preview
 
+from .bootstrap import BootstrapConfig, BootstrapPair
 from .features import SiftBackend
 from .guided import DEFAULT_GUIDED, predict_pose
 from .incremental import grow_landmarks, register_camera, with_landmark_quality
@@ -138,6 +139,17 @@ def extend_tracked_scene(
             ):
                 raise ValueError("Duplicate, invalid or out-of-bounds P2 observation")
             history[image_id, track_id] = pixel
+    hybrid = tracking.get("hybrid")
+    if hybrid is not None:
+        reserved = hybrid["reserved_track_id"]
+        if type(reserved) is not int or reserved < reserved_id:
+            raise ValueError("Hybrid preview track namespace must include all JPEG track IDs")
+        reserved_id = reserved
+        seed_segment = hybrid["image_segments"].get(str(boot["bootstrap_pair"][0]))
+        if seed_segment is None or any(
+            hybrid["image_segments"].get(str(i)) != seed_segment for i in boot["bootstrap_pair"]
+        ):
+            raise ValueError("Hybrid bootstrap must belong to one supported preview segment")
     for track in scene.tracks:
         for observation in track.observations:
             pixel = history.get((observation.image_id, track.track_id))
@@ -148,6 +160,7 @@ def extend_tracked_scene(
             ):
                 raise ValueError("P4 observations disagree with P2 temporal history")
     gyro_pairs = {}
+    motion_config = BootstrapConfig(**boot.get("settings", {}))
     if parallax_root:
         path = parallax_root / "parallax.json"
         parallax = json.loads(path.read_text())
@@ -204,6 +217,9 @@ def extend_tracked_scene(
             feature(source_id),
             feature(target_id),
             reserved_track_id=reserved_id,
+            # P4 owns the seed's ranked support/budget. Grow temporal structure
+            # only after an additional camera has passed PnP verification.
+            temporal_pixels=history if target_id not in seed_ids else None,
             config=config,
         )
         filename = f"pair_{source_id:03d}_{target_id:03d}_corridors.jpg"
@@ -317,6 +333,34 @@ def extend_tracked_scene(
     for i in selected:
         if i <= seed_ids[-1]:
             continue
+        if hybrid is not None and (
+            i not in hybrid["eligible_image_indices"]
+            or hybrid["image_segments"].get(str(i)) != seed_segment
+        ):
+            reason = (
+                "hybrid_still_association_unavailable"
+                if i not in hybrid["eligible_image_indices"]
+                else "hybrid_preview_segment_not_bootstrapped"
+            )
+            report["images"].append(
+                {
+                    "image_id": i,
+                    "success": False,
+                    "failure_reason": reason,
+                    "pnp": {
+                        "success": False,
+                        "reason": reason,
+                        "input_count": 0,
+                        "inlier_count": 0,
+                        "runtime_s": 0,
+                    },
+                    "pnp_attempts": [],
+                    "pnp_runtime_s": 0,
+                    "runtime_s": 0,
+                }
+            )
+            print(f"Image {i}: unsupported: {reason}", flush=True)
+            continue
         registered = sorted(scene.cameras, key=lambda c: records[c.image_id]["timestamp_ns"])
         previous, latest = registered[-2:]
         a, b = previous.image_id, latest.image_id
@@ -333,6 +377,18 @@ def extend_tracked_scene(
         )
         image(i)
         temporal = {t: pixel for (k, t), pixel in history.items() if k == i}
+        common = sorted(t for k, t in history if k == b and (i, t) in history)
+        motion_pair = BootstrapPair(
+            (b, i),
+            np.asarray(common, int),
+            np.asarray([history[b, t] for t in common]).reshape(-1, 2),
+            np.asarray([history[i, t] for t in common]).reshape(-1, 2),
+            cameras[b],
+            cameras[i],
+            # The pose-only retry uses visual cheirality/parallax gates; it
+            # does not run bootstrap selection or invent a gyro residual.
+            np.zeros(len(common)),
+        )
         scene, registration = register_camera(
             scene,
             i,
@@ -344,6 +400,8 @@ def extend_tracked_scene(
             config=config,
             pnp_config=pnp_config,
             confidence_config=confidence_config if refinement_config is not None else None,
+            motion_pair=motion_pair,
+            motion_config=motion_config,
         )
         filename = f"image_{i:03d}_projections.jpg"
         _write_image(
@@ -356,6 +414,19 @@ def extend_tracked_scene(
             ),
         )
         registration.update(prediction=prediction, debug_image=filename)
+        if (registration["two_view_prior"] or {}).get("available"):
+            fallback = registration["two_view_prior"]
+            filename = f"image_{i:03d}_two_view_prior.jpg"
+            _write_image(
+                output / filename,
+                draw_projections(
+                    images[i],
+                    fallback["projections"],
+                    fallback["patch_matches"],
+                    title=f"Image {i}: tracked two-view prior (PnP verification required)",
+                ),
+            )
+            fallback["debug_image"] = filename
         if registration["success"]:
             registration["growth"] = grow(b, i)
             if refinement_config is not None:
@@ -414,6 +485,8 @@ def extend_tracked_scene(
             "added_camera_count": len(scene.cameras) - 2,
             "point_count": len(scene.points),
             "added_landmark_count": len(scene.points) - initial_count,
+            "all_selected_cameras_registered": all(i in registered_ids for i in selected),
+            "reprojection_rmse_px": scene_rmse(scene),
         },
         unregistered_image_indices=[i for i in selected if i not in registered_ids],
         not_attempted_before_bootstrap=[i for i in selected if i < seed_ids[0]],

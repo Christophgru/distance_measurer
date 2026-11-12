@@ -9,6 +9,7 @@ from .schema import (
     Session,
     SessionMetadata,
 )
+from .tracking import TrackingEvent, TrackingFrame, TrackingRecording
 from .validation import SessionValidationError, ValidationReport, validate_session
 
 __all__ = [
@@ -18,6 +19,9 @@ __all__ = [
     "SensorSample",
     "Session",
     "SessionMetadata",
+    "TrackingEvent",
+    "TrackingFrame",
+    "TrackingRecording",
     "SessionValidationError",
     "ValidationReport",
     "load_session",

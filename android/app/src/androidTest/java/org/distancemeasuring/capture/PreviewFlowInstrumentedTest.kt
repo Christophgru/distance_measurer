@@ -11,10 +11,32 @@ import org.opencv.core.CvType
 import org.opencv.core.Mat
 import org.opencv.core.Size
 import org.opencv.imgproc.Imgproc
+import androidx.test.platform.app.InstrumentationRegistry
+import org.opencv.imgcodecs.Imgcodecs
+import java.io.File
 
 /** Native algorithm checks; separate from the manual physical camera acceptance. */
 @RunWith(AndroidJUnit4::class)
 class PreviewFlowInstrumentedTest {
+    @Test fun exportedPngIsNativeUnrotatedEightBitLuminance() {
+        val first = texture()
+        val output = File(InstrumentationRegistry.getInstrumentation().targetContext.cacheDir,
+            "preview_native_${System.nanoTime()}.png")
+        try {
+            val source = frame(first, 1_000_000_000)
+            PreviewPng.write(source, output)
+            val bytes = output.readBytes()
+            assertEquals(8, bytes[24].toInt()) // PNG IHDR bit depth.
+            assertEquals(0, bytes[25].toInt()) // PNG color type: grayscale, without alpha.
+            val decoded = Imgcodecs.imread(output.absolutePath, Imgcodecs.IMREAD_UNCHANGED)
+            try {
+                assertEquals(CvType.CV_8UC1, decoded.type())
+                assertEquals(first.rows(), decoded.rows()); assertEquals(first.cols(), decoded.cols())
+                val pixels = ByteArray(source.pixels.size); decoded.get(0, 0, pixels)
+                assertArrayEquals(source.pixels, pixels)
+            } finally { decoded.release() }
+        } finally { first.release(); output.delete() }
+    }
     private fun texture(): Mat {
         assertTrue(OpenCVLoader.initLocal())
         Core.setNumThreads(1)

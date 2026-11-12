@@ -178,6 +178,28 @@ class RecordingSessionTest {
         assertNull(recording.beginPhoto(now))
     }
 
+    @Test fun endingPreviewDiagnosticsPreserveExposureAndBackgroundEscalation() {
+        val recording = session()
+        now += 1_000_000
+        val ticket = checkNotNull(recording.beginPhoto(now))
+        val exposure = now + 100
+        now += 1_000_000
+        ticket.temporaryFile.writeBytes(byteArrayOf(1))
+        recording.completePhoto(ticket, now, JSONObject().put("sensor_timestamp_ns", exposure)
+            .put("sensor_timestamp_clock_domain", "android_elapsed_realtime_ns"))
+        assertEquals(exposure, recording.lastPhotoBoundaryNs)
+        assertEquals("camera_frame", recording.lastPhotoBoundarySource)
+        recording.requestEnd("user")
+        recording.notePreviewEnd("following_preview_queued", exposure + 100)
+        recording.requestEnd("activity_paused")
+        now += 1_000_000
+        recording.finish()
+        val metadata = JSONObject(File(recording.directory, "session.json").readText())
+        assertEquals("interrupted", metadata.getString("state"))
+        assertEquals("activity_paused", metadata.getString("end_reason"))
+        assertEquals(exposure, metadata.getJSONObject("preview_end").getLong("photo_boundary_ns"))
+    }
+
     @Test fun mergesSensorStreamsAndRejectsDuplicateAndLateSamples() {
         val recording = session()
         now += 500_000_000

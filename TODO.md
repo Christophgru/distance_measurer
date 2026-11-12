@@ -4,6 +4,30 @@ This TODO is intentionally scoped to **prototyping fast and robust camera-pose r
 
 The coding agent should execute **one task at a time**, keep changes small, and prefer existing code over new implementations.
 
+Capture direction (2026-10-27): the intended input is continuous handheld video
+tracking with occasional high-quality stills. Widely separated still images
+remain stress cases; recovering disconnected views is not the next priority.
+P9 adds recorded low-resolution tracking frames and approximately one still per
+second, building on the existing P7 preview path and P8 offline pipeline. Offline
+and implementation work can continue before another phone test. P7 physical
+acceptance stays pending until the combined P9 capture has been checked on a
+phone; compiled/native or synthetic tests do not close that requirement.
+
+Project direction (2026-10-28, supersedes the earlier ARCore evaluation): keep
+the project slim and demonstrate our own tracking/reconstruction work. Remove
+ARCore and the Google Play Services for AR requirement. Retain native Kotlin,
+CameraX/Camera2 and the existing OpenCV numerical/feature primitives. Reuse our
+P2–P6 algorithms and P7/P9 capture rather than adding another complete SLAM SDK.
+OpenCV remains useful even though its native library dominates APK size; measure
+future packaging improvements without replacing algorithm work with a service.
+
+P10 now develops our own bounded streaming pose estimator, first on the existing
+recorded previews and then in the current Android analysis path. P9 is the
+offline reference. A new ARCore phone recording is no longer a prerequisite.
+Distinguish current live 2D tracking from future live 6-DoF pose, and visual
+reconstruction units from measured metric scale. Preserve raw data and existing
+P9 readers. Keep processing budgets and failures observable.
+
 ## Legend
 
 - `[ ]` not started
@@ -518,6 +542,10 @@ Confidence thresholds gate both PnP and local BA without an untrusted fallback.
 
 Do this only after P2–P6 work offline on recorded data.
 
+Offline continuation evidence: [nine-image P2–P6 refinement](docs/experiments/p26_sequence_refinement.md)
+registers all nine cameras with verified PnP, bounded local BA and confidence
+filtering. P7 physical-device acceptance remains pending below.
+
 ## P7.1 Define keyframe criteria from the working offline pipeline
 
 [x] Convert measured offline behavior into a keyframe score using:
@@ -588,9 +616,18 @@ motion/JPEG/sensor coexistence checks for P7.2/P7.3 remain pending.
 
 # P8 — One prototype command and benchmark
 
+Implemented offline: [command and report contract](docs/architecture/incremental_command.md),
+[measured comparison](docs/experiments/p8_incremental.md). One-command runs recover
+9/9 reference cameras and 5/5 explicitly selected October 27 cameras; both
+reproduce prior staged geometry exactly. The full October 27 sequence remains
+2/9 and correctly exits as partial. The fresh fixed P0.2 comparison shows no
+speed/quality improvement: 34.47 s and 2/3 cameras versus 33.19 s and 3/3.
+49 focused tests, 114 stage regressions and 58 artifact checks pass. P7 physical
+and native-device acceptance remains pending.
+
 ## P8.1 Add the incremental reconstruction command
 
-[ ] Add one command for the prototype, for example:
+[x] Add one command for the prototype, for example:
 
 ```bash
 python python/scripts/reconstruct_incremental.py data/raw/<session>
@@ -619,7 +656,7 @@ One real short session completes without manual intermediate editing and reconst
 
 ## P8.2 Add timing and quality diagnostics
 
-[ ] Print and save per-stage metrics:
+[x] Print and save per-stage metrics:
 
 - feature-selection time,
 - optical-flow time,
@@ -641,7 +678,7 @@ A single report makes it possible to see whether runtime is dominated by trackin
 
 ## P8.3 Compare against the existing baseline
 
-[ ] Run the P0.2 baseline and the new incremental prototype on the same dataset.
+[x] Run the P0.2 baseline and the new incremental prototype on the same dataset.
 
 Compare only prototype-relevant properties:
 
@@ -659,7 +696,363 @@ Create one short experiment note stating whether the incremental approach is fas
 
 ---
 
-# Definition of the prototype milestone
+# P9 — Continuous tracking frames with periodic high-quality stills
+
+This is the next stage after P8, added for the intended video-tracking use case.
+The implementation contract and validation order are in
+[hybrid capture plan](docs/architecture/hybrid_capture.md). The existing roadmap
+previously ended at P8; this stage concerns capture/tracking, independent of the
+older M9 metric-measurement work.
+
+Start with the existing requested 640×480 luminance analysis stream and current
+maximum processing rate of 10 Hz. Measure actual frame cadence and gaps before
+changing that budget. Request a high-quality JPEG approximately every second
+during an active session, with a configurable interval and one capture in flight.
+These are initial budgets, not promises of device throughput or sufficient
+parallax. Higher-rate analysis and motion/quality-based still selection follow
+measured evidence. A compressed video file is optional; timestamped replayable
+tracking frames are required for the first prototype.
+
+## P9.1 Define the recording contract and offline ingestion
+
+[x] Specify a versioned optional tracking-frame sidecar and add its Python loader/
+validator using existing capture schemas, camera models and test fixtures.
+
+Implemented: [tracking-frame contract](docs/architecture/tracking_capture_format.md),
+typed optional `session.tracking`, consistency/pixel/clock validation and existing
+inspector integration. Preview/still identities remain separate. New Android
+builds record `BuildConfig` version name/code. 273 Python tests, 40 Android JVM
+tests, Kotlin compilation and Android lint pass. Three existing real sessions
+retain identical inspection summaries and raw hashes. Synthetic example and
+validation evidence: `data/processed/p9_contract/`. Subsequent capture, replay
+and physical acceptance evidence is tracked in P9.2–P9.4 below.
+
+- `[R]` Keep existing still-image/session/sensor recordings readable and immutable.
+- Record stable frame IDs, actual camera timestamps and clock domain, saved pixel
+  data, dimensions, crop/sample/rotation transforms, lens/intrinsics provenance,
+  and capture/drop/reset diagnostics. Keep preview IDs distinct from still IDs.
+- Associate streams through actual timestamps and image evidence; never equate a
+  timer request, callback, or encoded frame number with an exposure timestamp.
+- Export enough metadata to detect unsupported preview/still geometry or clocks.
+- Record the actual build version rather than the current hardcoded `0.4.0`
+  session label, so the next phone test identifies its capture implementation.
+
+**Acceptance**
+
+Original sessions load unchanged. Generated valid/invalid hybrid fixtures verify
+ordering, safe paths, clock availability, frame dimensions/transforms and explicit
+drops. A capture-format document distinguishes implemented fields from proposed
+ones before the phone writer uses them.
+
+## P9.2 Record tracking frames and schedule periodic stills
+
+[x] Extend the existing P7 analyzer and capture lifecycle with bounded frame
+export and optional automatic still requests at a configurable default of 1 s.
+
+Implemented in app 0.5.0 (code 6): [capture flow and lifecycle](docs/architecture/hybrid_capture.md#p92-implementation-and-use).
+The existing luminance/gyro processor exports native grayscale PNGs and full
+diagnostics through a bounded writer, with explicit drop/reset/failure records.
+Automatic photos default to 1 s (configurable 0.25–60 s); manual capture shares
+the existing one-photo limit. Delayed ticks, stale UI callbacks, End/background,
+writer drain and session isolation have focused checks. 57 JVM and 296 Python
+tests pass; main/native-test APKs build and lint passes. A JVM-generated session
+and nine actual writer-output cases pass independent Python format validation.
+Four native tests compile but are unexecuted. APKs, signatures, source hashes and
+evidence: `data/processed/p9_capture/`. The first combined phone recording is
+assessed under P9.4; P9.3 replay and remaining phone checks are tracked below.
+
+- `[R]` Reuse `PreviewAnalyzer`, `PreviewLumaSampler`, `LivePreviewProcessor`,
+  `CaptureRecorder`, `RecordingSession` and their independent workers.
+- Persist replayable frames plus tracking/gyro diagnostics on a bounded writer
+  queue. Close camera buffers promptly; report drops and storage failures rather
+  than queueing unlimited frames or blocking sensor/JPEG recording.
+- Allow one still in flight; record delayed/skipped ticks and actual exposures.
+  Stop scheduling on end/background, preserve manual capture, and prevent late
+  callbacks or frames leaking into another session.
+- Preserve the existing JPEG-resolution fallback and explicitly report when
+  hybrid recording is unavailable. Reuse current dependencies; evaluate an
+  encoded-video path only if measured storage/throughput requires it.
+- Keep timed capture separate from the current consecutive-preview keyframe
+  hint. Future adaptive capture must evaluate motion since the last selected
+  keyframe, not assume per-frame residuals accumulate automatically.
+
+**Acceptance**
+
+Build/JVM/native compilation and lifecycle/queue/scheduler tests pass. Output uses
+the P9.1 contract; slow storage and a busy camera produce bounded, explained
+losses. Actual simultaneous camera evidence and remaining device checks are
+tracked in P9.4.
+
+## P9.3 Replay continuous tracks and register the high-quality stills
+
+[x] Extend the existing P8 command to consume the hybrid recording, maintaining
+temporal tracks between stills and verifying still-image poses with image evidence.
+
+Implemented [hybrid replay](docs/architecture/hybrid_replay.md) in the existing
+command: globally distinct preview track IDs, explicit continuity segments,
+actual-exposure brackets and independently measured JPEG observations checked
+from both previews. The existing P3–P6 geometry and thresholds register/refine
+JPEG cameras. Default `auto` uses hybrid sidecars; `stills` keeps P8 behavior.
+Reports include separate capture timing, offline/device continuity, per-still
+image support, costs, runtime and quality. Full-suite validation: 901 Python
+tests pass; after tightening exposure-time diagnostics, all 29 focused hybrid/
+report tests pass. Ruff lint/formatting pass. Real replay retains all 29 stills
+and 435 previews: one preview segment, 28/29 verified 2D associations, **24/29
+registered cameras**, 3,632 points, 10,204 observations, **1.0566 px RMSE** at
+1600-pixel working resolution. Stills 4/5/26/27 fail PnP; 28 lacks a following
+preview. Cameras 21/22 initially register with only 8/9 PnP inliers, a low-margin
+acceptance before subsequent refinement.
+The command correctly exits 1 with a partial scene. All 469 raw files are
+unchanged; exported depths/gauge/residuals and unsupported-camera exclusion
+pass verification. [Results and limitations](data/processed/2026-10-27_153337_135_48fb0956/REPORT.md).
+
+Runtime remains a limitation: 2,331.9 s inside the pipeline, including 2,031.9 s
+for incremental registration/refinement; local BA takes 750.6 s and patch search
+609.0 s. This is an offline prototype, with no real-time or metric-accuracy claim.
+Further pose robustness and bounded matching/refinement cost need tuning before
+treating this as a validated distance-measurement workflow.
+
+[x] Focused refinement follow-up: app 0.5.1 (7) preserves the foreground End
+preview tail through an in-flight JPEG, with a bounded 2 s post-photo wait and
+explicit end diagnostics. Background/destruction still interrupt promptly.
+64 JVM tests, a clean main/native-test APK build and Android lint pass. The
+Python pass removes repeated full-image work, batches existing projection/
+confidence measurements and avoids repeated BA parameter/report bookkeeping.
+908 full-suite Python tests and 101 focused checks pass. Unchanged-selection
+replay takes **1,313.9 s / 21.90 min versus 2,331.9 s / 38.86 min** (1.77×);
+BA is 4.38× and local patch search 2.24× faster. Camera rotations/centers, point
+coordinates and all observation pixels/IDs match the baseline exactly: still
+24/29 cameras, 3,632 points, 10,204 observations and 1.056617 px RMSE. All raw
+hashes, geometry/gauge and configuration checks pass. Pose failures/weak views
+remain explicitly supported by the audit; no gate is loosened. The signed ARM64
+APK has the same certificate and verified launcher. Native execution and
+physical End/restart behavior remain P9.4 checks.
+[Results and artifacts](data/processed/2026-10-27_153337_135_48fb0956/refinement_p9/REPORT.md).
+
+- `[R]` Reuse P2/P3 tracking/gyro, P4 bootstrap, P5 PnP/guided matching and P6 BA.
+- Handle preview and JPEG intrinsics, crop, distortion and capture time
+  separately. Pixel scaling or choosing the nearest preview pose alone cannot
+  establish a valid still pose; verify cross-stream correspondences geometrically.
+- Report track continuity, frame gaps/resets, JPEG-induced tracking pauses,
+  request/exposure cadence, still registration support, runtime and quality.
+- Retain all captured frames/stills in raw data and explicitly label unsupported
+  segments. Do not force connections through a lost track interval.
+
+**Acceptance**
+
+Synthetic hybrid sequences exercise translation, rotation, differing crops/
+resolutions, timestamp offsets, missing frames and still capture pauses. One
+command produces an honest complete/partial report. Existing still-only P8
+results retain their behavior. Real-video continuity claims require P9.4 data.
+
+## P9.4 Validate the combined capture on a physical phone
+
+[~] After the new capture build is ready, record one short continuous session
+with periodic JPEGs and export the complete session for offline replay.
+
+First physical recording supplied: `2026-10-27_153337_135_48fb0956`, OnePlus
+CPH2581 / API 36 / app 0.5.0 (6), complete 58.398 s. Inspection confirms 435
+readable 640×480 previews and 29 readable 4096×3072 JPEGs with camera exposure
+times, sensors and stored live diagnostics. Saved rate is 7.498 Hz, maximum gap
+166.64 ms, zero writer drops and no all-track loss after initialization.
+JPEG-window gaps remain regular. A 1 s timer produces ~2 s exposures because
+29 alternate ticks are `camera_busy`; median callback latency is 1.306 s.
+Six sensor samples were reported dropped; one initial preview is not gyro-bracketed.
+The final JPEG follows the last preview by 99.98 ms and cannot pass dual-preview
+association. [Capture assessment](data/processed/2026-10-27_153337_135_48fb0956/REPORT.md).
+
+This supplies real P7 stream-coexistence and stored tracking-update evidence.
+On-screen diagnostics, the hold/rotation/translation protocol, end/restart
+isolation and four native instrumentation executions remain unverified.
+Do not equate recording inspection with these device checks.
+
+Second physical capture: `2026-10-28_152754_143_84510fbf`, the same phone on app
+0.6.0 (8), complete 32.369 s. It passes inspection with 16 readable 4096×3072
+JPEGs and 242 readable 640×480 previews, 7.501 Hz saved rate, maximum gap
+133.308 ms and no explicit frame export drops. Recorded track survival stays
+173–240 after initialization. All 16 JPEGs now have before/after timing brackets;
+the last saved preview follows the final exposure by 233.29 ms, independently
+supporting the stored `following_preview_queued` End decision. Median JPEG
+exposure cadence remains 2.000 s; 15 ticks skip while busy. Nine sensor samples
+are reported dropped, with no validation coverage error. All 263 raw hashes are
+unchanged. This validates capture/tail evidence; UI protocol, End-during-photo,
+restart/background and native execution checks remain open.
+[Assessment](data/processed/2026-10-28_152754_143_84510fbf/REPORT.md).
+
+The same October 28 capture also completes an unchanged-settings P9 replay:
+**16/16 cameras**, one continuous preview segment, all 16 dual-preview JPEG
+associations (564–751 tracks), 2,604 landmarks, 7,703 observations and **1.1597 px
+RMSE**. The final JPEG registers with 190/389 PnP inliers. Independent depth,
+rotation, gauge, source/settings and all 263 raw-hash checks pass. CLI exit 0;
+process runtime 680.23 s / 11.34 min. This closes the missing final-image timing
+and geometric-support issue for this run; it does not validate physical scale,
+native UI/lifecycle checks or P10 latency.
+[Full replay report](data/processed/2026-10-28_152754_143_84510fbf/prototype_hybrid_p9/REPORT.md).
+
+Current-app physical capture: `2026-10-28_225648_021_a0d054e8`, app 0.6.1 (9),
+complete 30.383 s with 15 readable 4096×3072 JPEGs and 227 readable 640×480
+previews. Inspection passes with zero reported sensor or frame-export drops,
+7.501 Hz saved rate, max gap 143.307 ms, no complete 2D track loss and a saved
+preview 233.29 ms after the final JPEG. JPEG exposure intervals remain about
+1.995 s despite 1 s timer requests. Unchanged-settings image replay verifies
+all 15 JPEGs with 500–685 dual-preview correspondences in one segment (98.65 s).
+All 247 raw hashes and algorithm source are unchanged. This is capture and 2D
+image support evidence; 3D camera registration was not run at that inspection.
+[Assessment](data/processed/2026-10-28_225648_021_a0d054e8/REPORT.md).
+
+Experimental follow-up (2026-10-29) completes unchanged-settings reconstruction
+on that 22:56 capture: **15/15 cameras**, 1,872 landmarks, 5,232 observations and
+**1.064 px RMSE**; CLI exit 0, process time 540.77 s / 9.01 min. Seven camera
+registrations are flagged for <=12 PnP inliers or <20% inlier fraction (indices
+2, 5, 6, 7, 9, 10, 11). Independent rotations/depth/gauge, prior image-support,
+source and all 247 raw-hash checks pass. This is an experimental sparse visual
+map with arbitrary scale, not the P10 bounded streaming implementation or a
+physical-accuracy pass. The exported offline viewer retains all points and
+cameras. [Experiment and viewer](data/processed/2026-10-28_225648_021_a0d054e8/EXPERIMENT.md).
+
+Follow-up tuning: measure low-latency still capture versus the current quality
+mode before promising 1 Hz. App 0.5.1 introduced the bounded End preview tail;
+the October 28 app 0.6.0 recording supplies saved-tail and final-image evidence.
+End-during-photo UI and restart/background behavior still need the phone checks.
+Existing raw recordings remain unchanged, including the missing final bracket
+in the October 27 session.
+
+**Acceptance**
+
+For roughly 20–30 s of gentle motion over a textured scene, live diagnostics
+update, tracking frames and readable full-quality JPEGs are saved, sensors remain
+covered, and actual cadence/gaps (especially during JPEG captures) are reported.
+Include a brief hold, rotation and translation, then an end/restart check. Record
+phone/build identity and native instrumentation results separately from observed
+camera behavior. Combine this with the pending P7 motion/JPEG/sensor checks;
+mark each acceptance only from its corresponding evidence. Poor throughput or
+unsupported streams produce a measured limitation and tuning task, not a pass.
+
+Another still-only recording is **not** a prerequisite for P9.1–P9.3. This combined
+phone test is required before claiming the hybrid mode works on the device.
+
+---
+
+# P10 — Our own bounded streaming pose estimator
+
+The user has chosen to retain our algorithm work and withdraw ARCore. The old
+SDK experiment is historical evidence, not the selected backend or an outstanding
+phone-test requirement. [Current scope](docs/architecture/live_pose.md).
+
+## P10.0 Withdraw the ARCore experiment
+
+[x] App 0.6.1 (9) removes the ARCore Gradle dependency, service/feature manifest
+entries, camera handoff, live screen and SDK-only data/export code. Archive the
+experiment and its inspector/tests outside active source. Preserve the existing
+capture/preview path, signing identity, P9 format and raw recordings. Publish a
+new main APK and verify the packaged manifest, dependencies and native libraries.
+Evidence: `data/processed/p10_own_tracking/`.
+
+## P10.1 Replay the existing algorithm as a bounded frame processor
+
+[ ] First implement and measure in Python on saved P9 tracking frames. Reuse P2
+feature tracking, P3 gyro utilities, P4 essential/cheirality bootstrap, P5 robust
+PnP and triangulation, and P6 landmark confidence/local refinement. Give the
+processor one ordered frame at a time; do not repeatedly reconstruct the full
+prefix. Keep only a bounded active map, keyframes and working images, with
+explicit initialization/tracking/loss/reset states. Report separate feature,
+pose, map-growth and refinement costs plus map/queue sizes.
+
+Run the October 28 recording as the first real reference: its offline result
+registers 16/16 JPEGs with 2,604 landmarks and 1.1597 px RMSE. Reuse synthetic
+translation, rotation-only, bad geometry, loss/recovery and clock tests. Preserve
+existing acceptance gates; do not assign poses to frames lacking support.
+The old ARCore log is not required, and another physical capture is not needed
+to begin this stage. Current capture data already supplies continuous previews.
+
+Use the 15:27 session (`2026-10-28_152754_143_84510fbf`) for that known geometric
+reference and the newer 22:56 app 0.6.1 session (`2026-10-28_225648_021_a0d054e8`)
+as an additional input: it supplies 227 continuous previews and image-supported
+observations for all 15 JPEGs, including closer desk views and darker conditions.
+
+**Acceptance**
+
+One-pass replay exports honest valid/invalid pose states, retained-state limits
+and per-frame timing. Memory/work do not grow with the entire recording history.
+Compare pose support and reprojection with the offline reference, accounting for
+visual gauge. Measure the 100–200 ms responsiveness target rather than assuming
+that 2D LK runtime is full pose latency. No new SLAM framework or Python dependency
+is part of this stage.
+
+## P10.2 Integrate the supported pose loop into Android
+
+[ ] After P10.1 has usable timing/geometry evidence, adapt the current analyzer
+and OpenCV primitives for bootstrap, PnP and bounded map updates. Preserve the
+single camera/capture lifecycle and independent JPEG/sensor recording. Put
+nonessential refinement away from the pose-update path. Show tracked features,
+keyframe decisions, valid camera motion and map/reprojection support as each is
+implemented. Label 2D-only states explicitly; never display invented 6-DoF poses.
+
+**Acceptance**
+
+Compile and test math/state/queue boundaries, then measure on the phone during
+hold/translation/rotation and JPEGs, End/restart and background/return. Report
+actual pose cadence/age, rejected updates, map bounds and tracking loss. Existing
+P7/P9.4 native and UI checks remain separate physical acceptance items.
+
+## P10.3 Add a small measurement demonstration with explicit scale
+
+**Priority:** build the offline reference-scaled measurement prototype before
+P10.1/P10.2 optimization and integration. The visible ruler in
+`2026-10-28_225648_021_a0d054e8` supplies an initial fixture. Its exploratory
+two-view check is published in
+`data/processed/2026-10-28_225648_021_a0d054e8/ruler_validation/REPORT.md`:
+held-out 3/2/5 cm spans measure 3.36/1.94/5.28 cm, but pixel-localization
+sensitivity is large and additional-view mark transfer failed. Keep metric
+acceptance open; review marks and establish independent-view repeatability.
+
+[ ] Keep the measurement demonstration narrow: supported 3D endpoints, distance
+in reconstruction units, and an optional known-length reference for metric
+scale. Check against an independently measured object and report repeatability.
+Monocular vision plus gyro alone does not establish metric scale. Full
+accelerometer/IMU fusion is separate work, not naive double integration or a
+prerequisite for a reference-scaled demonstration. Keep high-quality JPEG
+registration/refinement image-supported and outside the live critical path.
+
+[x] Implement the offline endpoint/known-reference prototype and full-resolution
+photo annotation page, with scene binding, frozen cameras, one fixed primary
+scale, explicit failed/missing views, held-out lengths, repeatability and
+pixel-localization sensitivity. Reuse existing geometry and dependencies.
+See `docs/architecture/measurement_prototype.md`; latest recording evidence is
+under `data/processed/2026-10-28_225648_021_a0d054e8/measurement_prototype/`.
+
+[ ] Confirm physical mark correspondences and demonstrate stable independent-view
+lengths, then check a separately measured object. The first single-pass manual
+later-view candidates pass basic reprojection but do not repeat the earlier
+lengths at a fixed scale. Do not mark metric accuracy accepted or optimize the
+streaming loop on the assumption that this has passed.
+
+[x] Investigate a texture-supported planar alternative and a ruler-excluded
+background refinement before optimizing streaming. Reuse existing camera math,
+OpenCV and SciPy. Publish the original/conditional/refined comparisons, maintain
+independent unused-view checks and preserve the original scene/annotations.
+Evidence: `docs/experiments/p10_measurement_stability.md` and the latest session's
+`measurement_stability/` outputs. 69 focused tests pass. The plane makes ruler
+numbers steadier but fails unused-view support; the background trial does not
+resolve it. Keep both experimental.
+
+[ ] Capture matching-settings checkerboard calibration and a sharp lateral-motion
+measurement session with a broad flat target and separately measured object.
+Printable target/protocol are in the latest session's
+`measurement_stability/capture_kit/`. Resolve geometry/support and physical
+accuracy before treating metric measurement or P10.1 optimization as ready.
+
+[x] Prepare recording intake for that physical test: validate structure/settings,
+detect/refine native JPEG board corners, reserve views before calibration, test
+unused corners with frozen K/distortion and prepare a reconstruction command
+only for matching inputs. Preserve raw hashes and never apply a synthetic or
+failed calibration to the real recording. See `docs/architecture/calibration_intake.md`.
+The existing desk recording correctly detects 0/15 boards; no camera profile or
+reconstruction is produced. The physical recordings remain outstanding.
+
+---
+
+# Definition of the P0–P8 prototype milestone
 
 The current prototype is successful when:
 

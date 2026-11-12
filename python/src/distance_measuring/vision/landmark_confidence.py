@@ -1,10 +1,12 @@
 """Confidence from current visual ray angles, residuals and observation support."""
 
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass
 
 import numpy as np
 
-from .incremental import with_landmark_quality
+from distance_measuring.optimization.bundle import project_observations
+
+from .incremental import landmark_quality
 
 
 @dataclass(frozen=True)
@@ -38,12 +40,18 @@ def score_landmarks(scene, *, config=DEFAULT_CONFIDENCE):
     """Recompute diagnostics from geometry; never trust cached error/angle fields."""
     cameras = {c.image_id: c for c in scene.cameras}
     tracks = {t.track_id: t for t in scene.tracks}
-    valid_points, valid_tracks, invalid = [], [], {}
+    observations, depths, residuals = project_observations(scene)
+    measured = {
+        (track_id, obs.image_id): (depth, float(np.linalg.norm(error)))
+        for (track_id, obs), depth, error in zip(observations, depths, residuals, strict=True)
+    }
+    quality, invalid = {}, {}
     for point in scene.points:
         fresh, reason = [], None
         for observation in tracks[point.track_id].observations:
             camera = cameras[observation.image_id]
-            if camera.extrinsics.world_to_camera(point.position)[2] <= 0:
+            depth, error = measured[point.track_id, observation.image_id]
+            if depth <= 0:
                 reason = "nonpositive_depth"
                 break
             if not (
@@ -52,25 +60,16 @@ def score_landmarks(scene, *, config=DEFAULT_CONFIDENCE):
             ):
                 reason = "observation_outside_image"
                 break
-            error = float(
-                np.linalg.norm(
-                    camera.intrinsics.project(point.position, camera.extrinsics, distort=False)
-                    - observation.pixel
-                )
-            )
             if not np.isfinite(error):
                 reason = "nonfinite_reprojection_error"
                 break
-            fresh.append(replace(observation, reprojection_error_px=error))
+            fresh.append(error)
         if reason:
             invalid[point.point_id] = reason
         else:
-            valid_points.append(point)
-            valid_tracks.append(replace(tracks[point.track_id], observations=tuple(fresh)))
-    measured = with_landmark_quality(
-        replace(scene, points=tuple(valid_points), tracks=tuple(valid_tracks))
-    )
-    quality = measured.metadata["landmark_quality"]
+            quality[str(point.point_id)] = landmark_quality(
+                point, tracks[point.track_id].observations, cameras, errors=fresh
+            )
     trusted, rows = set(), []
     for point in scene.points:
         row = {

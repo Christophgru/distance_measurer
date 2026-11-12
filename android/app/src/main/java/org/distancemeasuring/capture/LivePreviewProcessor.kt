@@ -3,23 +3,24 @@ package org.distancemeasuring.capture
 import android.util.Log
 import org.json.JSONArray
 import org.json.JSONObject
-import org.opencv.android.OpenCVLoader
-import org.opencv.core.Core
 import java.util.Locale
 
 data class PreviewCameraSettings(
     val realtimeClock: Boolean, val backCamera: Boolean, val sensorOrientation: Int?,
     val sensorWidthMm: Double?, val sensorHeightMm: Double?, val focalMm: Double?,
     val activeArray: PreviewCrop?, val pinnedCameraId: String?, val frames: FrameMetadataStore,
+    val cameraId: String = "unknown",
 )
 
 private data class PreviewFrameModel(val frame: PreviewLuma, val camera: PreviewIntrinsics?,
-                                     val physicalId: String?, val signature: String)
+                                     val physicalId: String?, val signature: String,
+                                     val metadata: JSONObject)
 
 /** One copied-frame delay lets already-recorded gyro samples bracket the frame. */
 class LivePreviewProcessor(
     private val gyro: PreviewGyroHistory,
     private val config: PreviewTrackingConfig = PreviewTrackingConfig(),
+    private val onExport: (String, PreviewFrameExport) -> Unit = { _, _ -> },
 ) : AutoCloseable {
     @Volatile private var settings: PreviewCameraSettings? = null
     private var activeSettings: PreviewCameraSettings? = null
@@ -35,15 +36,18 @@ class LivePreviewProcessor(
     fun process(frame: PreviewLuma, session: String): String {
         val setup = settings ?: return "Preview tracking: camera geometry unavailable"
         if (setup !== activeSettings || session != activeSession) {
+            if (session == activeSession) flush(session)
             tracker?.reset(); pending = null; previous = null; lastLogNs = -1
             activeSettings = setup; activeSession = session
         }
         if (!attemptedLoad) {
             attemptedLoad = true
-            val loaded = try { OpenCVLoader.initLocal() } catch (_: LinkageError) { false }
-            if (loaded) { Core.setNumThreads(1); tracker = PreviewFlowTracker(config) }
+            if (PreviewNativeRuntime.available()) tracker = PreviewFlowTracker(config)
         }
-        val flow = tracker ?: return "Preview tracking unavailable: OpenCV load failed; JPEG capture remains enabled"
+        val flow = tracker ?: run {
+            export(model(frame, setup), setup, JSONObject().put("unavailable_reason", "opencv_unavailable"), "tracking_unavailable")
+            return "Preview tracking unavailable: OpenCV load failed; JPEG capture remains enabled"
+        }
         val ready = pending
         pending = frame
         if (ready == null) return "Preview tracking: buffering one frame for gyro coverage"
@@ -51,7 +55,24 @@ class LivePreviewProcessor(
             processReady(ready, setup, flow)
         } catch (error: Exception) {
             flow.reset(); previous = null
+            export(model(ready, setup), setup, JSONObject().put("unavailable_reason", "flow_error")
+                .put("error", error.message), "flow_error")
             "Preview tracking reset: ${error.message}"
+        }
+    }
+
+    /** Called on the analysis worker after its session gate closes, before writer drain. */
+    fun flush(session: String) {
+        if (activeSession != session) return
+        val frame = pending ?: return
+        pending = null
+        val setup = activeSettings ?: return
+        val flow = tracker ?: return
+        try { processReady(frame, setup, flow) }
+        catch (error: Exception) {
+            flow.reset(); previous = null
+            export(model(frame, setup), setup, JSONObject().put("unavailable_reason", "flow_error")
+                .put("error", error.message), "flow_error")
         }
     }
 
@@ -63,14 +84,44 @@ class LivePreviewProcessor(
         val crop = if (rawCrop != null && rawCrop.length() == 4) PreviewCrop(rawCrop.getInt(0),
             rawCrop.getInt(1), rawCrop.getInt(2), rawCrop.getInt(3)) else setup.activeArray
         val camera = if (setup.sensorWidthMm != null && setup.sensorHeightMm != null && focal != null &&
-            setup.activeArray != null && crop != null) approximatePreviewIntrinsics(frame,
-                setup.sensorWidthMm, setup.sensorHeightMm, focal, setup.activeArray, crop) else null
+            setup.activeArray != null && crop != null) try { approximatePreviewIntrinsics(frame,
+                setup.sensorWidthMm, setup.sensorHeightMm, focal, setup.activeArray, crop) }
+                catch (_: IllegalArgumentException) { null } else null
         val physical = metadata?.optString("physical_camera_id")?.takeIf { it.isNotEmpty() && it != "null" }
             ?: setup.pinnedCameraId
         val signature = "${frame.width},${frame.height},${frame.bufferWidth},${frame.bufferHeight}," +
             "${frame.cropLeft},${frame.cropTop},${frame.cropWidth},${frame.cropHeight}," +
             "${frame.sampleStep},${frame.rotationDegrees},$camera"
-        return PreviewFrameModel(frame, camera, physical, signature)
+        val clock = if (setup.realtimeClock) "android_elapsed_realtime_ns" else "camera_unknown"
+        val record = JSONObject().put("width", frame.width).put("height", frame.height)
+            .put("camera_id", setup.cameraId).put("physical_camera_id", physical ?: JSONObject.NULL)
+            .put("rotation_degrees", frame.rotationDegrees).put("target_rotation", 0)
+            .put("is_flipped", false).put("lens_facing", if (setup.backCamera) 1 else 0)
+            .put("sensor_orientation_degrees", setup.sensorOrientation ?: JSONObject.NULL)
+            .put("sensor_timestamp_ns", frame.timestampNs).put("sensor_timestamp_clock_domain", clock)
+            .put("focal_length_mm", focal ?: JSONObject.NULL)
+            .put("metadata_source", if (metadata == null) "preview_camera_characteristics" else "exact_timestamp_camera2_preview")
+        for (name in listOf("crop_region", "focus_distance_diopters", "zoom_ratio", "exposure_time_s",
+            "iso", "ae_mode", "ae_state", "ae_lock", "awb_mode", "awb_state", "awb_lock", "af_mode", "af_state", "lens_state")) {
+            if (metadata?.has(name) == true) record.put(name, metadata.get(name))
+        }
+        return PreviewFrameModel(frame, camera, physical, signature, record)
+    }
+
+    private fun export(model: PreviewFrameModel, setup: PreviewCameraSettings,
+                       diagnostics: JSONObject, resetReason: String?) {
+        val clock = if (setup.realtimeClock) "android_elapsed_realtime_ns" else "camera_unknown"
+        val k = model.camera?.let { camera -> JSONObject().put("image_width", model.frame.width)
+            .put("image_height", model.frame.height)
+            .put("camera_matrix", JSONArray(listOf(listOf(camera.fx, camera.skew, camera.cx),
+                listOf(0.0, camera.fy, camera.cy), listOf(0.0, 0.0, 1.0))))
+            .put("distortion", JSONArray(listOf(0, 0, 0, 0, 0)))
+            .put("source", "metadata-derived").put("approximate", true)
+            .put("pixel_convention", "stored_pixels_ignore_exif").put("camera_id", setup.cameraId)
+            .put("assumptions", JSONArray(listOf("Nominal focal/sensor/crop preview geometry",
+                "Approximate principal point; distortion is uncalibrated and set to zero"))) }
+        onExport(checkNotNull(activeSession), PreviewFrameExport(model.frame, model.metadata, k, clock,
+            diagnostics, "${setup.cameraId},${model.physicalId},$clock,${model.signature}", resetReason))
     }
 
     private fun processReady(frame: PreviewLuma, setup: PreviewCameraSettings, flow: PreviewFlowTracker): String {
@@ -123,6 +174,8 @@ class LivePreviewProcessor(
             Log.i("PreviewTracking", diagnostics.toString()); lastLogNs = frame.timestampNs
         }
         previous = current
+        export(current, setup, diagnostics, if (reset) "camera_geometry_or_timestamp_changed"
+            else if (source == null) "tracking_reference_reset" else null)
         fun formatted(value: Double?) = value?.let { String.format(Locale.US, "%.2f", it) } ?: "unavailable"
         return "tracks: ${step.activeCount} (${step.matches.size} survived); median FB: ${formatted(step.medianFbError)} px\n" +
             "rotation-compensated parallax: ${formatted(parallax)} px; keyframe: ${decision.label}\n" +

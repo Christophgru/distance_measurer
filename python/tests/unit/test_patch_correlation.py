@@ -7,6 +7,8 @@ from distance_measuring.vision.correlation import (
     correlate_local_point,
     correlate_pair_matches,
     correlate_patch,
+    correlate_prepared_local_point,
+    prepare_correlation_image,
 )
 
 
@@ -100,3 +102,24 @@ def test_insufficient_local_neighbors_are_unverified_without_demanding_a_third_v
 def test_invalid_patch_inputs_fail(template, search):
     with pytest.raises(ValueError):
         correlate_patch(template, search)
+
+
+def test_prepared_patch_batch_owns_pixels_and_still_finds_a_known_brightness_changed_match():
+    original = texture()
+    shifted = cv2.warpAffine(original * 1.2 + 15, np.array([[1.0, 0, 7], [0, 1, -3]]), (180, 180))
+    first, second = prepare_correlation_image(original), prepare_correlation_image(shifted)
+    original[:] = 0
+    shifted[:] = 0
+    assert not first.flags.writeable and not second.flags.writeable
+    for pixel in ([50, 60], [80, 90], [120, 120]):
+        result = correlate_prepared_local_point(first, second, pixel, np.asarray(pixel) + [8, -4])
+        assert result["accepted"] and result["score"] > 0.999
+        assert_allclose(result["second_pixel_refined"], np.asarray(pixel) + [7, -3], atol=1e-7)
+
+
+@pytest.mark.parametrize(
+    "image", [np.full((30, 30), np.nan), np.ones((0, 30)), np.ones((30, 30, 3))]
+)
+def test_prepared_batch_rejects_invalid_image_data_before_search(image):
+    with pytest.raises(ValueError, match="grayscale"):
+        prepare_correlation_image(image)

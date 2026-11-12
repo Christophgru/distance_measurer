@@ -1,6 +1,40 @@
+import java.io.File
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+}
+
+// Keep one debug identity in the persistent checkout, rather than a container's
+// disposable ~/.android directory. An existing local key is never replaced.
+val localDebugKeystore = providers.gradleProperty("captureDebugKeystore")
+    .map { rootProject.file(it) }
+    .getOrElse(rootProject.file(".signing/debug.keystore"))
+val prepareLocalDebugKeystore = tasks.register("prepareLocalDebugKeystore") {
+    outputs.file(localDebugKeystore)
+    onlyIf { !localDebugKeystore.exists() }
+    doLast {
+        localDebugKeystore.parentFile.mkdirs()
+        val existing = File(System.getProperty("user.home"), ".android/debug.keystore")
+        if (existing.isFile) {
+            existing.copyTo(localDebugKeystore)
+        } else {
+            val keytool = File(System.getProperty("java.home"), "bin/keytool")
+            providers.exec {
+                commandLine(
+                    keytool, "-genkeypair", "-noprompt", "-storetype", "JKS",
+                    "-keystore", localDebugKeystore, "-storepass", "android",
+                    "-alias", "androiddebugkey", "-keypass", "android",
+                    "-keyalg", "RSA", "-keysize", "2048", "-validity", "10000",
+                    "-dname", "CN=Android Debug,O=Android,C=US",
+                )
+            }.result.get().assertNormalExitValue()
+        }
+        localDebugKeystore.setReadable(false, false)
+        localDebugKeystore.setWritable(false, false)
+        localDebugKeystore.setReadable(true, true)
+        localDebugKeystore.setWritable(true, true)
+    }
 }
 
 android {
@@ -11,8 +45,8 @@ android {
         applicationId = "org.distancemeasuring.capture"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "0.4.0"
+        versionCode = 9
+        versionName = "0.6.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     compileOptions {
@@ -20,7 +54,27 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
+    buildFeatures { buildConfig = true }
+    signingConfigs.getByName("debug") {
+        storeFile = localDebugKeystore
+        storePassword = "android"
+        keyAlias = "androiddebugkey"
+        keyPassword = "android"
+    }
+    splits {
+        abi {
+            isEnable = providers.gradleProperty("splitApks").map { it.toBooleanStrict() }
+                .getOrElse(false)
+            reset()
+            include("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
+            isUniversalApk = true
+        }
+    }
 }
+
+tasks.matching {
+    it.name == "validateSigningDebug" || it.name == "validateSigningDebugAndroidTest"
+}.configureEach { dependsOn(prepareLocalDebugKeystore) }
 
 dependencies {
     implementation("androidx.activity:activity-ktx:1.10.1")
@@ -38,6 +92,9 @@ dependencies {
 }
 
 tasks.withType<Test>().configureEach {
+    providers.gradleProperty("hybridFixtureOutput").orNull?.let {
+        systemProperty("hybrid.fixture.output", rootProject.file(it).absolutePath)
+    }
     systemProperty("keyframe.cases", rootProject.file("../tools/validation/keyframe_cases.json").absolutePath)
     systemProperty("preview.gyro.cases", rootProject.file("../tools/validation/preview_gyro_cases.json").absolutePath)
 }

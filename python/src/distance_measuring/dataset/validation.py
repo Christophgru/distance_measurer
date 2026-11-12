@@ -68,6 +68,10 @@ def validate_session(session: Session, *, max_sensor_gap_s: float = 0.25) -> Val
     _validate_timeline(session, report)
     _validate_sensors(session, report, max_sensor_gap_s)
     _validate_images(session, report)
+    if session.tracking is not None:
+        from .tracking_validation import validate_tracking
+
+        validate_tracking(session, report, max_sensor_gap_s)
     return report
 
 

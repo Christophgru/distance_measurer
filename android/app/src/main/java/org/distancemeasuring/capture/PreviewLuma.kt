@@ -8,6 +8,7 @@ data class PreviewLuma(
     val rotationDegrees: Int, val bufferWidth: Int, val bufferHeight: Int,
     val cropLeft: Int, val cropTop: Int, val cropWidth: Int, val cropHeight: Int,
     val sampleStep: Int,
+    val receivedTimestampNs: Long = timestampNs,
 ) {
     /** Maps a native buffer pixel into the unrotated, cropped, sampled Y image. */
     fun sampledPixel(x: Double, y: Double) = Pair((x - cropLeft) / sampleStep, (y - cropTop) / sampleStep)

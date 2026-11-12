@@ -129,6 +129,131 @@ def capture(capture_factory):
     return capture_factory()
 
 
+@dataclass
+class HybridCaptureFixture:
+    capture: CaptureFixture
+    manifest: dict
+    records: list[dict]
+
+    @property
+    def path(self):
+        return self.capture.path
+
+    def write(self):
+        self.capture.write()
+        (self.path / "tracking.json").write_text(json.dumps(self.manifest), encoding="utf-8")
+        (self.path / "tracking/events.jsonl").write_text(
+            "".join(json.dumps(row) + "\n" for row in self.records), encoding="utf-8"
+        )
+        return self.path
+
+
+@pytest.fixture
+def hybrid_capture(capture_factory):
+    """Original PNG preview samples, drops/resets and automatic capture decisions."""
+    from distance_measuring.camera import CameraIntrinsics
+
+    capture = capture_factory()
+    (capture.path / "tracking/frames").mkdir(parents=True)
+    camera = CameraIntrinsics(45, 46, 19.5, 11.5, 40, 24, camera_id="0")
+    pixels = np.arange(96 * 64, dtype=np.uint8).reshape(64, 96)
+    records = [
+        {
+            "type": "reset",
+            "sequence": 0,
+            "recorded_timestamp_ns": 1_150_000_000,
+            "next_frame_id": 0,
+            "reason": "session_start",
+        }
+    ]
+    for frame_id, timestamp in ((0, 1_200_000_000), (2, 1_400_000_000), (3, 1_800_000_000)):
+        filename = f"tracking/frames/frame_{frame_id:06d}.png"
+        assert cv2.imwrite(str(capture.path / filename), pixels[4:52:2, 8:88:2])
+        records.append(
+            {
+                "type": "frame",
+                "sequence": 0,
+                "recorded_timestamp_ns": timestamp + 20_000_000,
+                "frame_id": frame_id,
+                "filename": filename,
+                "timestamp_ns": timestamp,
+                "clock_domain": CLOCK_DOMAIN,
+                "received_timestamp_ns": timestamp + 1_000_000,
+                "buffer_size": [96, 64],
+                "buffer_crop_region": [8, 4, 88, 52],
+                "sample_step": 2,
+                "metadata": {
+                    "width": 40,
+                    "height": 24,
+                    "camera_id": "0",
+                    "physical_camera_id": "wide",
+                    "rotation_degrees": 90,
+                    "target_rotation": 0,
+                    "is_flipped": False,
+                    "lens_facing": 1,
+                    "sensor_orientation_degrees": 90,
+                },
+                "intrinsics": camera.to_dict(),
+                "intrinsics_unavailable_reason": None,
+                "diagnostics": {"quality_status": "synthetic_contract_fixture"},
+            }
+        )
+    records.extend(
+        [
+            {
+                "type": "drop",
+                "sequence": 0,
+                "recorded_timestamp_ns": 1_320_000_000,
+                "first_frame_id": 1,
+                "count": 1,
+                "reason": "writer_queue_full",
+            },
+            {
+                "type": "capture",
+                "sequence": 0,
+                "recorded_timestamp_ns": 1_510_000_000,
+                "scheduled_timestamp_ns": 1_490_000_000,
+                "status": "requested",
+                "request_timestamp_ns": 1_500_000_000,
+                "image_index": 1,
+                "reason": None,
+            },
+            {
+                "type": "capture",
+                "sequence": 0,
+                "recorded_timestamp_ns": 1_610_000_000,
+                "scheduled_timestamp_ns": 1_600_000_000,
+                "status": "skipped",
+                "request_timestamp_ns": None,
+                "image_index": None,
+                "reason": "camera_busy",
+            },
+        ]
+    )
+    records.sort(key=lambda row: row["recorded_timestamp_ns"])
+    for sequence, row in enumerate(records):
+        row["sequence"] = sequence
+    manifest = {
+        "schema_version": 1,
+        "session_id": capture.metadata["session_id"],
+        "state": "complete",
+        "failure_reason": None,
+        "records_file": "tracking/events.jsonl",
+        "pixel_format": "gray8_png",
+        "settings": {
+            "requested_width": 640,
+            "requested_height": 480,
+            "max_analysis_fps": 10,
+            "still_interval_s": 1,
+            "writer_queue_capacity": 4,
+        },
+        "counts": {"frames": 3, "dropped_frames": 1, "resets": 1, "capture_events": 2},
+    }
+    fixture = HybridCaptureFixture(capture, manifest, records)
+    fixture.write()
+    return fixture
+
+
 @pytest.fixture
 def bundle_scene_factory():
     """Original calibrated three-view scenes, with known geometry and optional outliers."""
@@ -194,6 +319,179 @@ def bundle_scene_factory():
             Scene(tuple(cameras), tuple(truth_tracks + [rejected]), tuple(truth_points), metadata),
             Scene(tuple(initial), tuple(tracks + [rejected]), tuple(initial_points), metadata),
             bad,
+        )
+
+    return make
+
+
+@pytest.fixture
+def hybrid_scene_factory(capture_factory, tmp_path):
+    """Original nonplanar preview/JPEG sequences with actual independent exposure times."""
+    from types import SimpleNamespace
+
+    from distance_measuring.camera import CameraExtrinsics, CameraIntrinsics, save_intrinsics
+
+    def make(
+        *,
+        image_count=3,
+        cropped_jpeg=False,
+        mode="translation",
+        missing_frames=(),
+        geometry_change=False,
+        unknown_clock=False,
+        exposure_offset_s=0.03,
+    ):
+        capture = capture_factory(image_count=image_count)
+        (capture.path / "tracking/frames").mkdir(parents=True)
+        camera = CameraIntrinsics(400, 400, 319.5, 239.5, 640, 480, camera_id="0")
+        jpeg_camera = (
+            CameraIntrinsics(480, 480, 335.5, 230.5, 640, 480, camera_id="0")
+            if cropped_jpeg
+            else camera
+        )
+        rng = np.random.default_rng(31)
+        source = np.array([(x, y) for y in range(55, 440, 55) for x in range(160, 610, 55)])
+        depth = rng.uniform(4, 12, len(source))
+        world = np.c_[camera.normalize_pixels(source), np.ones(len(source))] * depth[:, None]
+        patches = rng.integers(0, 255, (len(source), 31, 31), np.uint8)
+        base_texture = cv2.resize(rng.integers(0, 255, (120, 160), np.uint8), (640, 480))
+
+        def pose(timestamp):
+            elapsed = (timestamp - 1_050_000_000) / 1e9
+            if mode == "rotation":
+                from scipy.spatial.transform import Rotation
+
+                return CameraExtrinsics(
+                    Rotation.from_rotvec([0, 0, elapsed * 0.15]).as_matrix(), [0, 0, 0]
+                )
+            return CameraExtrinsics(np.eye(3), [elapsed * 2.8, 0, 0])
+
+        def render(timestamp, intrinsics):
+            extrinsics = pose(timestamp)
+            if mode == "rotation":
+                warp = intrinsics.K @ extrinsics.R_cw @ np.linalg.inv(camera.K)
+                return cv2.warpPerspective(base_texture, warp, intrinsics.image_size)
+            image = np.full((480, 640), 65, np.uint8)
+            pixels = intrinsics.project(world, extrinsics)
+            diameter = int(round(31 * intrinsics.fx / camera.fx)) | 1
+            radius = diameter // 2
+            for pixel, patch in zip(pixels, patches, strict=True):
+                x, y = np.rint(pixel).astype(int)
+                if radius <= x < 640 - radius and radius <= y < 480 - radius:
+                    image[y - radius : y + radius + 1, x - radius : x + radius + 1] = cv2.resize(
+                        patch, (diameter, diameter)
+                    )
+            return image
+
+        for event in (e for e in capture.events if e["type"] == "image"):
+            event["timestamp_ns"] += round(exposure_offset_s * 1e9)
+            event["timestamp_source"] = "camera_frame"
+            event["callback_timestamp_ns"] = event["timestamp_ns"] + 5_000_000
+            metadata = event["metadata"]
+            metadata.update(
+                width=640,
+                height=480,
+                camera_id="0",
+                physical_camera_id="synthetic",
+                exif_orientation=1,
+                rotation_degrees=0,
+                target_rotation=0,
+                sensor_orientation_degrees=0,
+                lens_facing=1,
+                is_flipped=False,
+                sensor_timestamp_ns=event["timestamp_ns"],
+                sensor_timestamp_clock_domain=CLOCK_DOMAIN,
+            )
+            assert cv2.imwrite(
+                str(capture.path / event["filename"]), render(event["timestamp_ns"], jpeg_camera)
+            )
+        if mode == "rotation":
+            for row in capture.rows:
+                if row["sensor_type"] == "gyroscope":
+                    row["z"] = 0.15
+        records = []
+        missing_frames = set(missing_frames)
+        for i in range(10):
+            timestamp = 1_050_000_000 + i * 100_000_000
+            common = {"sequence": 0, "recorded_timestamp_ns": timestamp + 2_000_000}
+            if i in missing_frames:
+                records.append(
+                    {
+                        **common,
+                        "type": "drop",
+                        "first_frame_id": i,
+                        "count": 1,
+                        "reason": "synthetic_missing_frame",
+                    }
+                )
+                continue
+            left = 16 if geometry_change and i >= 5 else 0
+            gray = render(timestamp, camera)[0:480:2, left:640:2]
+            affine = np.array([[0.5, 0, -left * 0.5], [0, 0.5, 0], [0, 0, 1]])
+            intrinsics = CameraIntrinsics.from_K(affine @ camera.K, gray.shape[::-1], camera_id="0")
+            filename = f"tracking/frames/frame_{i:06d}.png"
+            assert cv2.imwrite(str(capture.path / filename), gray)
+            records.append(
+                {
+                    **common,
+                    "type": "frame",
+                    "frame_id": i,
+                    "filename": filename,
+                    "timestamp_ns": timestamp + (90_000_000_000 if unknown_clock else 0),
+                    "clock_domain": "camera_unknown" if unknown_clock else CLOCK_DOMAIN,
+                    "received_timestamp_ns": timestamp + 1_000_000,
+                    "buffer_size": [640, 480],
+                    "buffer_crop_region": [left, 0, 640, 480],
+                    "sample_step": 2,
+                    "metadata": {
+                        "width": gray.shape[1],
+                        "height": gray.shape[0],
+                        "camera_id": "0",
+                        "physical_camera_id": "synthetic",
+                        "rotation_degrees": 0,
+                        "target_rotation": 0,
+                        "lens_facing": 1,
+                        "sensor_orientation_degrees": 0,
+                        "is_flipped": False,
+                    },
+                    "intrinsics": intrinsics.to_dict(),
+                    "intrinsics_unavailable_reason": None,
+                }
+            )
+        for seq, row in enumerate(records):
+            row["sequence"] = seq
+        manifest = {
+            "schema_version": 1,
+            "session_id": capture.metadata["session_id"],
+            "state": "complete",
+            "failure_reason": None,
+            "records_file": "tracking/events.jsonl",
+            "pixel_format": "gray8_png",
+            "settings": {
+                "requested_width": 640,
+                "requested_height": 480,
+                "max_analysis_fps": 10,
+                "still_interval_s": 1,
+                "writer_queue_capacity": 4,
+            },
+            "counts": {
+                "frames": 10 - len(missing_frames),
+                "dropped_frames": len(missing_frames),
+                "resets": 0,
+                "capture_events": 0,
+            },
+        }
+        fixture = HybridCaptureFixture(capture, manifest, records)
+        fixture.write()
+        calibration = save_intrinsics(tmp_path / (capture.path.name + "_camera.yaml"), jpeg_camera)
+        return SimpleNamespace(
+            fixture=fixture,
+            path=fixture.path,
+            calibration=calibration,
+            camera=camera,
+            jpeg_camera=jpeg_camera,
+            world=world,
+            pose=pose,
         )
 
     return make

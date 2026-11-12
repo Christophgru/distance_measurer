@@ -164,6 +164,7 @@ def test_undeclared_optional_sensor_is_rejected_by_validation(capture):
     [
         '{"schema_version": 1, "schema_version": 1}',
         '{"value": NaN}',
+        '{"value": 1e999}',
         "{invalid}",
         "[]",
     ],

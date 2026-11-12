@@ -72,6 +72,12 @@ correspondence retries do not move them to manufacture support. The radius rule
 is an RMSE-based heuristic, not a covariance or calibrated uncertainty estimate.
 A new unregistered frame starts with the configured coarse-search radius.
 
+Retry feature IDs are allocated above the complete P2 temporal namespace,
+including IDs whose observations occur in later frames. P5's temporal landmark
+growth can therefore retain persistent IDs without collisions with P6 retries.
+The original seed's temporal support remains governed by P4; new temporal
+landmarks are added after additional cameras pass PnP.
+
 Stop reasons distinguish no accepted local refinement, no meaningful RMSE or
 correspondence improvement, no new guided correspondences despite a useful BA
 step, and the fixed round limit. No additions ends the guided loop; an unchanged

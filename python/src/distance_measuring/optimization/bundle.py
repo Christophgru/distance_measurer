@@ -20,22 +20,45 @@ from distance_measuring.scene import Scene, SceneCamera
 LOSSES = ("linear", "soft_l1", "huber", "cauchy")
 
 
-def reprojection_residuals(scene: Scene) -> np.ndarray:
-    """Predicted minus observed (u,v), in track/observation order, accepted points only."""
+def project_observations(scene: Scene):
+    """Batch the existing camera projection; retain original track/observation order.
+
+    Return (track/observation pairs, camera depths, Nx2 residuals). Nonpositive
+    depths have NaN residuals so confidence can reject them before projection.
+    """
     cameras = {camera.image_id: camera for camera in scene.cameras}
     points = {point.point_id: point for point in scene.points}
-    residuals = []
+    observations, groups = [], {}
     for track in scene.tracks:
         if track.point_id is None:
             continue
         point = points[track.point_id].position
         for observation in track.observations:
-            camera = cameras[observation.image_id]
-            # Lecture 002 pp. 65–68, 70–76, 82–83: rho*m=K[R|-R*C]P_h.
-            # Divide homogeneous scale before comparing ideal working pixels.
-            predicted = camera.intrinsics.project(point, camera.extrinsics, distort=False)
-            residuals.extend(predicted - observation.pixel)
-    return np.asarray(residuals, dtype=float)
+            groups.setdefault(observation.image_id, []).append(
+                (len(observations), point, observation.pixel)
+            )
+            observations.append((track.track_id, observation))
+    depth = np.empty(len(observations))
+    residuals = np.full((len(observations), 2), np.nan)
+    for image_id, group in groups.items():
+        camera = cameras[image_id]
+        indices = np.array([r[0] for r in group])
+        world = np.asarray([r[1] for r in group])
+        local_depth = camera.extrinsics.world_to_camera(world)[:, 2]
+        depth[indices] = local_depth
+        positive = local_depth > 0
+        if positive.any():
+            predicted = camera.intrinsics.project(world[positive], camera.extrinsics, distort=False)
+            residuals[indices[positive]] = predicted - np.asarray([r[2] for r in group])[positive]
+    return observations, depth, residuals
+
+
+def reprojection_residuals(scene: Scene) -> np.ndarray:
+    """Predicted minus observed (u,v), in track/observation order, accepted points only."""
+    _, depth, residuals = project_observations(scene)
+    if np.any(depth <= 0):
+        raise ValueError("Projection requires points strictly in front of the camera (+Z)")
+    return residuals.ravel()
 
 
 def _cost(residuals: np.ndarray, loss: str, scale: float) -> float:
@@ -131,6 +154,7 @@ class _Problem:
             if point.point_id in variable_points:
                 self.point_slices[i] = slice(len(initial), len(initial) + 3)
                 initial.extend(self.positions[i])
+        self.variable_point_indices = np.array(list(self.point_slices), dtype=int)
         if not initial:
             raise ValueError("Bundle adjustment has no free variables")
         self.initial = np.asarray(initial, dtype=float)
@@ -227,8 +251,9 @@ class _Problem:
             else:
                 centers[camera] = values[3:]
         points = self.positions.copy()
-        for point, section in self.point_slices.items():
-            points[point] = parameters[section]
+        # Point coordinates occupy the contiguous tail of the same parameter
+        # vector. Assign that block without a Python loop on every solver call.
+        points[self.variable_point_indices] = parameters[self.point_start :].reshape(-1, 3)
         return rotations, centers, points
 
     def project(self, parameters):
@@ -394,6 +419,7 @@ def bundle_adjust(
         )
     if not accepted:
         cameras, tracks, points = list(scene.cameras), list(scene.tracks), list(scene.points)
+    observed_point_ids = {scene.points[i].point_id for _, i in problem.rows}
     report = {
         "accepted": accepted,
         "converged": bool(solved.success),
@@ -430,9 +456,7 @@ def bundle_adjust(
         "variable_camera_ids": [scene.cameras[i].image_id for i in problem.camera_slices],
         "variable_point_ids": [scene.points[i].point_id for i in problem.point_slices],
         "observation_point_ids": [
-            p.point_id
-            for p in scene.points
-            if p.point_id in {scene.points[i].point_id for _, i in problem.rows}
+            p.point_id for p in scene.points if p.point_id in observed_point_ids
         ],
         "rejected_track_count": sum(track.point_id is None for track in tracks),
     }

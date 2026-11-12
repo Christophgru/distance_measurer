@@ -16,11 +16,18 @@ import androidx.camera.core.ImageProxy
 import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.Executor
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.max
 import kotlin.math.sqrt
 
 /** Sensor callbacks, file writes, and session transitions share one worker queue. */
-class CaptureRecorder(context: Context, private val onState: (RecordingState) -> Unit) :
+class CaptureRecorder(
+    context: Context,
+    private val requestAutomatic: (String, Long) -> Unit,
+    private val stopPreview: (String, () -> Unit) -> Unit,
+    private val closePreview: () -> Unit,
+    private val onState: (RecordingState) -> Unit,
+) :
     SensorEventListener {
     private val app = context.applicationContext
     private val manager = app.getSystemService(Context.SENSOR_SERVICE) as SensorManager
@@ -31,6 +38,24 @@ class CaptureRecorder(context: Context, private val onState: (RecordingState) ->
     private var destroying = false
     private var lastUiNs = 0L
     private var state = RecordingState()
+    private var tracking: TrackingFrameWriter? = null
+    private class PreviewExportBinding(val path: String, val writer: TrackingFrameWriter) {
+        val lastQueuedNs = AtomicLong(-1)
+        @Volatile var comparableClock: Boolean? = null
+    }
+    @Volatile private var exportBinding: PreviewExportBinding? = null
+    @Volatile private var cameraReady = false
+    @Volatile private var analysisReady = false
+    @Volatile private var analysisUnavailableReason = "analysis_stream_unavailable"
+    private var schedule: PeriodicStillSchedule? = null
+    private val automaticGate = AutomaticStillGate()
+    private var pendingAutomaticCallback: Runnable? = null
+    private var previewDrained = false
+    private var stoppingPreview = false
+    private var endReason = "user"
+    private var previewEnd = PreviewEndPolicy()
+    private val previewTailTick = Runnable { guarded { if (!finishIfReady()) publish() } }
+    private val automaticTick = Runnable { guarded { tickAutomatic() } }
     val previewGyro = PreviewGyroHistory()
     private val sensors = mapOf(
         "accelerometer" to manager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER),
@@ -40,7 +65,23 @@ class CaptureRecorder(context: Context, private val onState: (RecordingState) ->
         "magnetometer" to manager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD),
     )
 
-    fun start() = dispatch {
+    fun setCameraAvailability(photos: Boolean, analysis: Boolean, reason: String) {
+        cameraReady = photos; analysisReady = analysis; analysisUnavailableReason = reason
+        if (!analysis) exportBinding?.writer?.unavailable(reason)
+    }
+
+    fun offerPreview(path: String, value: PreviewFrameExport) {
+        val binding = exportBinding ?: return
+        if (binding.path != path) return
+        if (value.diagnostics.optString("unavailable_reason") == "opencv_unavailable")
+            binding.writer.unavailable("opencv_unavailable")
+        else if (binding.writer.offer(value)) {
+            binding.comparableClock = value.clockDomain == "android_elapsed_realtime_ns"
+            if (binding.comparableClock == true) binding.lastQueuedNs.set(value.frame.timestampNs)
+        }
+    }
+
+    fun start(config: HybridCaptureConfig = HybridCaptureConfig()) = dispatch {
         if (session != null || destroying) {
             publish()
             return@dispatch
@@ -53,9 +94,19 @@ class CaptureRecorder(context: Context, private val onState: (RecordingState) ->
         }, "sessions")
         val recording = RecordingSession(root, JSONObject()
             .put("manufacturer", Build.MANUFACTURER).put("model", Build.MODEL)
-            .put("android_api", Build.VERSION.SDK_INT).put("app_version", "0.4.0"),
+            .put("android_api", Build.VERSION.SDK_INT)
+            .put("app_version", BuildConfig.VERSION_NAME)
+            .put("app_version_code", BuildConfig.VERSION_CODE),
             sensors.mapValues { it.value != null }, SystemClock::elapsedRealtimeNanos)
         session = recording
+        val writer = TrackingFrameWriter(recording.directory, recording.directory.name,
+            recording.startNs, config, SystemClock::elapsedRealtimeNanos, PreviewPng::write,
+            if (analysisReady) null else analysisUnavailableReason)
+        tracking = writer; exportBinding = PreviewExportBinding(recording.directory.absolutePath, writer)
+        previewEnd = PreviewEndPolicy()
+        previewDrained = false; stoppingPreview = false; endReason = "user"
+        schedule = if (config.automaticStills) PeriodicStillSchedule(recording.startNs, config.stillIntervalMs) else null
+        schedule?.let { handler.postDelayed(automaticTick, it.delayMs(SystemClock.elapsedRealtimeNanos())) }
         previewGyro.begin(recording.startNs)
         sensors.forEach { (name, sensor) ->
             // 100 Hz requested, no hardware batching. Actual rates are device dependent.
@@ -71,20 +122,32 @@ class CaptureRecorder(context: Context, private val onState: (RecordingState) ->
     fun takePhoto(
         imageCapture: ImageCapture, cameraMetadata: JSONObject, targetRotation: Int,
         geometry: CaptureGeometry,
+        automaticPath: String? = null, scheduledNs: Long? = null,
     ) {
         // Sample the button timestamp on the UI thread, before scheduling storage work.
         val requestNs = SystemClock.elapsedRealtimeNanos()
         dispatch {
             val recording = session
+            if (scheduledNs != null) {
+                if (recording?.directory?.absolutePath != automaticPath ||
+                    !automaticGate.consume(automaticPath ?: "", scheduledNs)) return@dispatch
+                pendingAutomaticCallback = null
+                if (!cameraReady) {
+                    tracking?.capture(scheduledNs, reason = "camera_unavailable")
+                    return@dispatch
+                }
+            }
             if (recording == null) {
                 publish()
                 return@dispatch
             }
             val ticket = recording.beginPhoto(requestNs)
             if (ticket == null) {
+                if (scheduledNs != null) tracking?.capture(scheduledNs, reason = "camera_busy")
                 publish()
                 return@dispatch
             }
+            if (scheduledNs != null) tracking?.capture(scheduledNs, ticket)
             publish()
             val timeout = Runnable {
                 guarded {
@@ -101,6 +164,7 @@ class CaptureRecorder(context: Context, private val onState: (RecordingState) ->
                 if (!handler.post(command)) command.run()
             }
             main.post {
+                if (!ticket.captureAllowed) return@post
                 try {
                     imageCapture.targetRotation = targetRotation
                     imageCapture.takePicture(
@@ -112,7 +176,7 @@ class CaptureRecorder(context: Context, private val onState: (RecordingState) ->
                                 val saveImage = Runnable {
                                     try {
                                         guarded {
-                                            if (recording.closed || session !== recording) {
+                                            if (recording.closed || session !== recording || !ticket.captureAllowed) {
                                                 ticket.temporaryFile.delete()
                                                 return@guarded
                                             }
@@ -160,18 +224,86 @@ class CaptureRecorder(context: Context, private val onState: (RecordingState) ->
     }
 
     fun end(reason: String = "user") = dispatch {
-        session?.requestEnd(reason)
+        session?.let { beginEnd(it, reason) }
         if (!finishIfReady()) publish()
     }
 
     fun destroy() = dispatch {
         destroying = true
-        session?.requestEnd("activity_destroyed")
-        if (session == null) worker.quitSafely() else if (!finishIfReady()) publish()
+        session?.let { beginEnd(it, "activity_destroyed") }
+        if (session == null) finishDestroy() else if (!finishIfReady()) publish()
+    }
+
+    private fun tickAutomatic() {
+        val recording = session ?: return
+        val active = schedule ?: return
+        if (recording.ending || recording.closed) return
+        val now = SystemClock.elapsedRealtimeNanos()
+        active.due(now)?.let { tick ->
+            // Resolve an older UI request before recording any newer ticks, preserving
+            // capture-event order even if the main thread is stalled.
+            cancelPendingAutomatic("request_delayed")
+            if (tick.missedCount > 0) tracking?.capture(tick.firstMissedNs,
+                reason = "scheduler_delayed", missedCount = tick.missedCount,
+                lastSkippedNs = tick.lastMissedNs)
+            val reason = when {
+                recording.hasPendingPhoto -> "camera_busy"
+                !cameraReady -> "camera_unavailable"
+                else -> null
+            }
+            if (reason != null) tracking?.capture(tick.scheduledNs, reason = reason)
+            else {
+                val token = Pair(recording.directory.absolutePath, tick.scheduledNs)
+                automaticGate.reserve(token.first, token.second)
+                val callback = Runnable { requestAutomatic(token.first, token.second) }
+                pendingAutomaticCallback = callback
+                main.post(callback)
+            }
+        }
+        handler.postDelayed(automaticTick, active.delayMs(SystemClock.elapsedRealtimeNanos()))
+    }
+
+    fun skipAutomatic(path: String, scheduledNs: Long, reason: String) = dispatch {
+        if (automaticGate.consume(path, scheduledNs)) {
+            pendingAutomaticCallback = null
+            tracking?.capture(scheduledNs, reason = reason)
+        }
+    }
+
+    private fun stopAutomatic() {
+        schedule?.stop(); schedule = null; handler.removeCallbacks(automaticTick)
+        cancelPendingAutomatic("session_ending")
+    }
+
+    private fun cancelPendingAutomatic(reason: String) {
+        pendingAutomaticCallback?.let { main.removeCallbacks(it) }
+        pendingAutomaticCallback = null
+        automaticGate.cancel()?.let { tracking?.capture(it.second, reason = reason) }
+    }
+
+    private fun beginEnd(recording: RecordingSession, reason: String) {
+        stopAutomatic()
+        if (!recording.ending || (endReason == "user" && reason != "user")) endReason = reason
+        recording.requestEnd(reason)
+        previewEnd.begin(reason)
+    }
+
+    private fun stopRecordingPreview(recording: RecordingSession) {
+        stoppingPreview = true
+        handler.removeCallbacks(previewTailTick)
+        stopPreview(recording.directory.absolutePath) {
+            dispatch {
+                if (session === recording) {
+                    previewDrained = true; exportBinding = null
+                    if (!finishIfReady()) publish()
+                }
+            }
+        }
     }
 
     override fun onSensorChanged(event: SensorEvent) = guarded {
         val recording = session ?: return@guarded
+        if (recording.closed) return@guarded
         val type = when (event.sensor.type) {
             Sensor.TYPE_ACCELEROMETER -> "accelerometer"
             Sensor.TYPE_GYROSCOPE -> "gyroscope"
@@ -200,23 +332,52 @@ class CaptureRecorder(context: Context, private val onState: (RecordingState) ->
 
     private fun finishIfReady(): Boolean {
         val recording = session ?: return false
-        if (!recording.ending || recording.hasPendingPhoto) return false
+        if (!recording.ending || recording.closed) return false
+        if (!stoppingPreview) {
+            val binding = exportBinding?.takeIf { it.path == recording.directory.absolutePath }
+            val latest = binding?.lastQueuedNs?.get()?.takeIf { it > 0 }
+            val decision = previewEnd.decision(SystemClock.elapsedRealtimeNanos(),
+                recording.hasPendingPhoto, recording.lastPhotoBoundaryNs, latest,
+                analysisReady && cameraReady && binding?.comparableClock != false)
+            if (decision == null) {
+                // Pending JPEG completion/watchdog calls us again; only poll a short preview tail.
+                if (!recording.hasPendingPhoto) {
+                    handler.removeCallbacks(previewTailTick)
+                    handler.postDelayed(previewTailTick, 50)
+                }
+                return false
+            }
+            recording.notePreviewEnd(decision, latest)
+            stopRecordingPreview(recording)
+        }
+        if (recording.hasPendingPhoto || !previewDrained) return false
         // Unregister before the final timestamp. Already queued callbacks see no session.
         manager.unregisterListener(this)
         recording.finish()
-        state = snapshot(recording).copy(active = false, ending = false, message = "saved")
-        session = null
-        val update = state
-        main.post { onState(update) }
-        if (destroying) worker.quitSafely()
+        exportBinding = null
+        val writer = checkNotNull(tracking)
+        writer.finish(if (endReason == "user") null else "session_ended:$endReason").whenComplete { result, _ ->
+            handler.post {
+                if (session === recording) {
+                    state = snapshot(recording).copy(active = false, ending = false,
+                        message = if (result.state == "complete") "saved" else "saved; tracking ${result.state}",
+                        trackingMessage = writer.message)
+                    session = null; tracking = null
+                    val update = state; main.post { onState(update) }
+                    if (destroying) finishDestroy()
+                }
+            }
+        }
         return true
     }
 
     private fun snapshot(recording: RecordingSession) = RecordingState(
-        active = !recording.closed, ending = recording.ending,
+        active = true, ending = recording.ending,
         capturing = recording.hasPendingPhoto, imageCount = recording.imageCount,
         sampleCount = recording.sampleCount, path = recording.directory.absolutePath,
         message = if (recording.ending) "finishing" else "recording",
+        trackingMessage = tracking?.message ?: "",
+        previewFinishing = recording.ending && !stoppingPreview && endReason == "user",
     )
 
     private fun publish(message: String? = null) {
@@ -235,18 +396,39 @@ class CaptureRecorder(context: Context, private val onState: (RecordingState) ->
             block()
         } catch (error: Exception) {
             manager.unregisterListener(this)
+            handler.removeCallbacks(previewTailTick)
+            stopAutomatic()
+            exportBinding = null
+            val recording = session
+            val writer = tracking
             val path = session?.directory?.absolutePath ?: state.path
             try {
                 session?.abort()
             } catch (_: Exception) {
                 // Preserve the original failure; unfinished metadata remains on disk.
             }
-            session = null
-            state = state.copy(active = false, ending = false, capturing = false,
-                path = path, message = "Recording failed: ${error.message}")
-            val update = state
-            main.post { onState(update) }
-            if (destroying) worker.quitSafely()
+            fun finishFailure() {
+                writer?.finish("capture_recording_failed: ${error.message}")?.whenComplete { _, _ ->
+                    handler.post { publishFailure(path, error.message, writer.message) }
+                } ?: publishFailure(path, error.message, "")
+            }
+            if (recording != null && !stoppingPreview) {
+                stoppingPreview = true
+                stopPreview(recording.directory.absolutePath) { handler.post { finishFailure() } }
+            } else finishFailure()
         }
+    }
+
+    private fun publishFailure(path: String, reason: String?, trackingMessage: String) {
+        session = null; tracking = null
+        state = state.copy(active = false, ending = false, capturing = false,
+            path = path, message = "Recording failed: $reason", trackingMessage = trackingMessage)
+        val update = state; main.post { onState(update) }
+        if (destroying) finishDestroy()
+    }
+
+    private fun finishDestroy() {
+        worker.quitSafely()
+        main.post { closePreview() }
     }
 }

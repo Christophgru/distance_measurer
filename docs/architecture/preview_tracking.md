@@ -1,5 +1,11 @@
 # P7: keyframes and Android preview tracking
 
+[P9.2 hybrid capture](hybrid_capture.md#p92-implementation-and-use) now persists
+the tracking stream and adds periodic high-quality stills in app 0.5.0. The P7
+algorithm and keyframe-policy description below remains applicable; original
+log-only/manual capture limitations are superseded by P9.2's sidecar and timer.
+P7 device acceptance can be checked alongside the combined P9 phone test.
+
 ## P7.1 keyframe policy
 
 ```bash
@@ -75,8 +81,8 @@ the phone checks below.
 
 The debug APK, `lintDebug` and 35 JVM tests pass, including original capture
 tests and Y-plane crop/stride/sampling tests. UI timestamps demonstrate the
-stream interface once a timeline is active; no preview images or extra events
-are written into the recording format.
+stream interface once a timeline is active. P7 originally wrote no preview
+images/events; P9.2 now saves a separate tracking sidecar.
 
 ## P7.3 live tracking prototype
 
@@ -117,7 +123,8 @@ Keyframe labels remain proposals requiring later geometry verification.
 
 During an active timeline, the existing screen displays track/survival count,
 median FB error, rotation-compensated residual parallax, keyframe label and
-unavailable/reset reason. It never triggers a JPEG automatically. Compact JSON
+unavailable/reset reason. This keyframe policy never triggers a JPEG itself;
+P9.2 adds an independent optional periodic timer. Compact JSON
 is also logged at most twice per second:
 
 ```bash
@@ -127,9 +134,10 @@ adb logcat -s PreviewTracking:I '*:S'
 Logs include timestamp/clock, dimensions, sample step, one-frame delay, active/
 surviving/valid tracks, source/target coverage, FB/parallax, compensation warnings,
 gyro sample count/gaps/reasons, candidate thresholds, and flow/selection runtimes.
-They are diagnostics, not extra recording events. No preview frames or tracking
-files are added to raw sessions. The sensor/JPEG schema and manual photo control
-are unchanged; device metadata now identifies app 0.4.0.
+P7 originally kept these diagnostics only in logs. P9.2 persists them with native
+grayscale preview frames in the versioned tracking sidecar. The sensor/JPEG
+schemas and manual photo control remain compatible; new device metadata uses
+the actual build version name/code.
 
 OpenCV loads lazily on the analysis worker with one native thread. A load/flow
 failure reports unavailable/reset diagnostics and leaves JPEG controls enabled.

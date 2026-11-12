@@ -6,6 +6,7 @@ from typing import Any
 
 from .capture_geometry import summarize_capture_geometry
 from .schema import Session
+from .tracking_validation import summarize_tracking
 from .validation import ValidationReport
 
 
@@ -48,7 +49,7 @@ def summarize_session(session: Session, report: ValidationReport) -> dict[str, A
             }
         )
         previous_ns = image.timestamp_ns
-    return {
+    summary = {
         "session_id": session.metadata.session_id,
         "directory": str(session.path),
         "state": session.metadata.state,
@@ -65,6 +66,9 @@ def summarize_session(session: Session, report: ValidationReport) -> dict[str, A
         "warnings": [{"code": issue.code, "message": issue.message} for issue in report.warnings]
         + geometry["warnings"],
     }
+    if session.tracking is not None:
+        summary["tracking"] = summarize_tracking(session.tracking)
+    return summary
 
 
 def format_summary(summary: dict[str, Any]) -> str:
@@ -87,6 +91,19 @@ def format_summary(summary: dict[str, Any]) -> str:
             f"  {name}: {sensor['count']} samples, {rate}, "
             f"max gap {sensor['max_gap_s'] * 1000:.2f} ms, "
             f"available={sensor['available']}"
+        )
+    if "tracking" in summary:
+        tracking = summary["tracking"]
+        lines.extend(
+            [
+                "",
+                f"Tracking: {tracking['state']}; {tracking['frame_count']} saved frames; "
+                f"{tracking['dropped_frame_count']} explicit drops; "
+                f"{tracking['reset_count']} resets",
+                f"  Saved-frame rate: {tracking['observed_camera_rate_hz']} Hz; "
+                f"max gap: {tracking['max_frame_gap_s']} s; "
+                f"unknown clocks: {tracking['unknown_clock_frame_count']}",
+            ]
         )
     lines.extend(["", f"Images: {len(summary['images'])}"])
     for image in summary["images"]:

@@ -9,7 +9,7 @@ from scipy.spatial.transform import Rotation
 
 from distance_measuring.camera import CameraExtrinsics, to_homogeneous
 
-from .correlation import correlate_local_point
+from .correlation import correlate_prepared_local_point, prepare_correlation_image
 from .matching import match_descriptors
 
 
@@ -29,11 +29,20 @@ class GuidedConfig:
     max_reprojection_error_px: float = 3.0
     min_triangulation_angle_degrees: float = 1.0
     max_gyro_disagreement_degrees: float = 15.0
+    min_prior_landmarks: int = 3
+    use_two_view_prior: bool = True
 
     def __post_init__(self):
-        for name in ("search_radius_px", "max_features", "max_epipolar_queries"):
+        for name in (
+            "search_radius_px",
+            "max_features",
+            "max_epipolar_queries",
+            "min_prior_landmarks",
+        ):
             if type(getattr(self, name)) is not int or getattr(self, name) < 1:
                 raise ValueError(f"{name} must be a positive integer")
+        if self.min_prior_landmarks < 3 or type(self.use_two_view_prior) is not bool:
+            raise ValueError("Two-view priors need a boolean switch and at least three anchors")
         if type(self.patch_size) is not int or self.patch_size < 3 or self.patch_size % 2 != 1:
             raise ValueError("patch_size must be an odd integer >=3")
         for name in (
@@ -85,8 +94,9 @@ def predict_pose(previous, latest, fraction, *, gyro_rotation=None, config=DEFAU
     return CameraExtrinsics(predicted, latest.C_w + fraction * (latest.C_w - previous.C_w)), report
 
 
-def project_landmarks(scene, camera, pose, *, config=DEFAULT_GUIDED):
+def project_landmarks(scene, camera, pose, *, normalize_patches=False, config=DEFAULT_GUIDED):
     tracks = {t.track_id: t for t in scene.tracks}
+    cameras = {c.image_id: c for c in scene.cameras}
     rows = []
     for point in scene.points:
         depth = float(pose.world_to_camera(point.position)[2])
@@ -105,24 +115,54 @@ def project_landmarks(scene, camera, pose, *, config=DEFAULT_GUIDED):
                 "search_radius_px": config.search_radius_px,
             }
         )
+        if normalize_patches and visible:
+            source = max(tracks[point.track_id].observations, key=lambda o: o.image_id)
+            reference = cameras[source.image_id]
+            source_depth = reference.extrinsics.world_to_camera(point.position)[2]
+            if source_depth <= 1e-10:
+                continue
+            rotation = pose.R_cw @ reference.extrinsics.R_cw.T
+            translation = pose.R_cw @ (reference.extrinsics.C_w - pose.C_w)
+            # A source-frontoparallel plane through the landmark approximates
+            # local patch scale/orientation; it is not a reconstructed surface.
+            H = camera.K @ (rotation + np.outer(translation, [0, 0, 1]) / source_depth)
+            H = H @ np.linalg.inv(reference.intrinsics.K)
+            mapped = H @ np.r_[source.pixel, 1]
+            if abs(mapped[2]) > 1e-10 and np.linalg.matrix_rank(H) == 3:
+                shift = pixel - mapped[:2] / mapped[2]
+                H = np.array([[1, 0, shift[0]], [0, 1, shift[1]], [0, 0, 1]]) @ H
+                rows[-1]["template_homography"] = H.tolist()
     return rows
 
 
 def search_landmark_patches(scene, images, target_image, projections, *, config=DEFAULT_GUIDED):
-    """NCC over (2r+1)^2 centers, with ambiguity and optional reverse checks."""
+    """NCC over (2r+1)^2 centers, with ambiguity and optional reverse checks.
+
+    An optional image warp normalizes patch shape; its grid/radius is in source
+    template pixels, as in the reused correlation helper.
+    """
     start = perf_counter()
     tracks = {t.track_id: t for t in scene.tracks}
     rows, occupied = [], []
+    prepared = {}
+    target_prepared = None
     for projection in projections:
         row = {**projection, "accepted": False, "reason": "not_visible", "candidates_examined": 0}
         if projection["visible"]:
             # The latest available observation is the closest temporal template.
             source = max(tracks[row["track_id"]].observations, key=lambda o: o.image_id)
-            result = correlate_local_point(
-                images[source.image_id],
-                target_image,
+            warp = projection.get("template_homography")
+            if target_prepared is None:
+                target_prepared = prepare_correlation_image(target_image)
+            if source.image_id not in prepared:
+                prepared[source.image_id] = prepare_correlation_image(images[source.image_id])
+            source_prepared = prepared[source.image_id]
+            result = correlate_prepared_local_point(
+                source_prepared,
+                target_prepared,
                 source.pixel,
                 projection["predicted_pixel"],
+                homography=warp,
                 patch_size=config.patch_size,
                 search_radius=config.search_radius_px,
                 min_score=config.min_correlation,
@@ -130,11 +170,12 @@ def search_landmark_patches(scene, images, target_image, projections, *, config=
             )
             row.update(result, source_image_id=source.image_id, source_pixel=list(source.pixel))
             if result["accepted"] and config.mutual:
-                reverse = correlate_local_point(
-                    target_image,
-                    images[source.image_id],
+                reverse = correlate_prepared_local_point(
+                    target_prepared,
+                    source_prepared,
                     result["second_pixel_refined"],
                     source.pixel,
+                    homography=np.linalg.inv(warp) if warp is not None else None,
                     patch_size=config.patch_size,
                     search_radius=config.search_radius_px,
                     min_score=config.min_correlation,

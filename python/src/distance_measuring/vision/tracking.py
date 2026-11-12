@@ -195,6 +195,8 @@ class FlowResult:
     forward_runtime_s: float
     backward_runtime_s: float
     motion_initialization: dict | None = None
+    backward_points: np.ndarray | None = None
+    geometry_initialization: dict | None = None
 
 
 def _map_homography(matrix, points):
@@ -368,16 +370,40 @@ def _track_points(first, second, points, config, initial_warp=None):
         perf_counter() - start,
         forward_time,
         backward_time,
+        backward_points=backward_points,
     )
 
 
-def track_points(first, second, points, config: TrackingConfig = DEFAULT_CONFIG):
+def track_points(
+    first, second, points, config: TrackingConfig = DEFAULT_CONFIG, *, initial_warp=None
+):
     """Pure temporal LK, with opt-in bounded descriptor initialization on failure.
 
     Guided retries warp the source image/points, then perform two LK passes.
     Returned pixels map back before measuring round-trip source error.
     """
     start = perf_counter()
+    if initial_warp is not None:
+        warp = np.asarray(initial_warp, float)
+        if warp.shape != (3, 3) or not np.isfinite(warp).all() or abs(np.linalg.det(warp)) < 1e-12:
+            raise ValueError("Initial tracking warp must be a finite invertible 3x3 matrix")
+        plain = track_points(first, second, points, config)
+        guided = _track_points(first, second, points, config, warp)
+        use_guided = guided.accepted.sum() > plain.accepted.sum()
+        selected = guided if use_guided else plain
+        return replace(
+            selected,
+            runtime_s=perf_counter() - start,
+            forward_runtime_s=plain.forward_runtime_s + guided.forward_runtime_s,
+            backward_runtime_s=plain.backward_runtime_s + guided.backward_runtime_s,
+            motion_initialization=plain.motion_initialization,
+            geometry_initialization={
+                "H_second_first": warp.tolist(),
+                "guided_retry_selected": bool(use_guided),
+                "plain_accepted_count": int(plain.accepted.sum()),
+                "guided_accepted_count": int(guided.accepted.sum()),
+            },
+        )
     result = _track_points(first, second, points, config)
     required = min(
         len(result.points), max(8, int(np.ceil(len(result.points) * config.motion_retry_ratio)))

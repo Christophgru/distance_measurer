@@ -27,16 +27,36 @@
         android:layout_width="match_parent" android:layout_height="wrap_content"
         android:textIsSelectable="true" android:textSize="12sp" />
 
+    <TextView android:id="@+id/tracking_status"
+        android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:textSize="12sp" />
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="horizontal" android:gravity="center_vertical">
+    <CheckBox android:id="@+id/automatic_photos"
+        android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+        android:checked="true" android:text="@string/automatic_photos" />
+    <EditText android:id="@+id/photo_interval"
+        android:layout_width="64dp" android:layout_height="48dp"
+        android:inputType="numberDecimal" android:maxLength="6"
+        android:selectAllOnFocus="true" android:text="1"
+        android:hint="@string/photo_interval" android:contentDescription="@string/photo_interval" />
+    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:text="@string/photo_interval_unit" />
+    </LinearLayout>
+
     <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
         android:text="@string/capture_guidance" android:textSize="13sp" />
 
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="horizontal">
     <Button android:id="@+id/start"
-        android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
         android:enabled="false" android:text="@string/start_timeline" />
     <Button android:id="@+id/capture"
-        android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
         android:enabled="false" android:text="@string/take_picture" />
     <Button android:id="@+id/end"
-        android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
         android:enabled="false" android:text="@string/end_timeline" />
+    </LinearLayout>
 </LinearLayout>

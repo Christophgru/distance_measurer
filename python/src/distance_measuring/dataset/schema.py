@@ -5,7 +5,10 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath, PureWindowsPath
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .tracking import TrackingRecording
 
 SENSOR_TYPES = ("accelerometer", "gyroscope", "rotation_vector")
 OPTIONAL_SENSOR_TYPES = ("game_rotation_vector", "magnetometer")
@@ -33,6 +36,31 @@ def _text(value: Any, location: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise DatasetFormatError(f"{location}: expected a nonempty string")
     return value
+
+
+def _relative_path(value: Any, location: str) -> str:
+    filename = _text(value, location)
+    if (
+        PurePosixPath(filename).is_absolute()
+        or PureWindowsPath(filename).drive
+        or "\\" in filename
+        or "\x00" in filename
+        or any(part in ("", ".", "..") for part in filename.split("/"))
+    ):
+        raise DatasetFormatError(f"{location}: expected a safe relative path")
+    return filename
+
+
+def capture_path(root: Path, filename: str) -> Path:
+    """Resolve a previously parsed capture path, including symlink containment."""
+    _relative_path(filename, "capture filename")
+    try:
+        path = (root / filename).resolve()
+    except (OSError, RuntimeError) as error:
+        raise DatasetFormatError(f"{filename}: cannot resolve capture path: {error}") from error
+    if not path.is_relative_to(root.resolve()):
+        raise DatasetFormatError(f"{filename}: capture path resolves outside the session directory")
+    return path
 
 
 def _number(value: Any, location: str, *, positive: bool = False) -> float:
@@ -297,16 +325,7 @@ class ImageEvent:
     @classmethod
     def from_dict(cls, value: Any, location: str = "image") -> ImageEvent:
         data = _object(value, location)
-        filename = _text(data.get("filename"), f"{location}.filename")
-        parts = filename.split("/")
-        if (
-            PurePosixPath(filename).is_absolute()
-            or PureWindowsPath(filename).drive
-            or "\\" in filename
-            or "\x00" in filename
-            or any(part in ("", ".", "..") for part in parts)
-        ):
-            raise DatasetFormatError(f"{location}.filename: expected a safe relative path")
+        filename = _relative_path(data.get("filename"), f"{location}.filename")
         kwargs = {}
         for name in ("request_timestamp_ns", "callback_timestamp_ns"):
             if data.get(name) is not None:
@@ -330,6 +349,7 @@ class Session:
     metadata: SessionMetadata
     sensor_samples: tuple[SensorSample, ...]
     events: tuple[Event | ImageEvent, ...]
+    tracking: TrackingRecording | None = None
 
     @property
     def images(self) -> tuple[ImageEvent, ...]:
@@ -363,9 +383,4 @@ class Session:
         }
 
     def image_path(self, image: ImageEvent) -> Path:
-        path = (self.path / image.filename).resolve()
-        if not path.is_relative_to(self.path.resolve()):
-            raise DatasetFormatError(
-                f"{image.filename}: image resolves outside the session directory"
-            )
-        return path
+        return capture_path(self.path, image.filename)

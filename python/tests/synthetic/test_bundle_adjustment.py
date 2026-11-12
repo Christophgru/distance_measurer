@@ -7,7 +7,7 @@ from scipy.spatial.transform import Rotation
 
 from distance_measuring.camera import CameraExtrinsics
 from distance_measuring.optimization import bundle_adjust, reprojection_residuals
-from distance_measuring.optimization.bundle import _Problem
+from distance_measuring.optimization.bundle import _Problem, project_observations
 from distance_measuring.scene import SceneCamera
 
 
@@ -23,6 +23,42 @@ def test_perfect_reprojection_residuals_are_zero_in_observation_order(bundle_sce
     changed = reprojection_residuals(replace(truth, tracks=tuple(tracks)))
     assert_allclose(changed[:2], [-2, 3], atol=1e-12)
     assert_allclose(changed[2:], 0, atol=1e-12)
+
+
+def test_batched_observation_geometry_preserves_order_and_exposes_invalid_depth(
+    bundle_scene_factory,
+):
+    truth, _, _ = bundle_scene_factory(count=12, noise_px=0, perturb=False)
+    points = list(truth.points)
+    points[0] = replace(points[0], position=(0, 0, -100))
+    scene = replace(truth, points=tuple(points))
+    rows, depth, errors = project_observations(scene)
+    assert [(t, o.image_id) for t, o in rows] == [
+        (t.track_id, o.image_id)
+        for t in scene.tracks
+        if t.point_id is not None
+        for o in t.observations
+    ]
+    assert (depth[:3] < 0).all() and np.isnan(errors[:3]).all()
+    assert (depth[3:] > 0).all()
+    assert_allclose(errors[3:], 0, atol=1e-12)
+    with pytest.raises(ValueError, match="front"):
+        reprojection_residuals(scene)
+
+
+def test_sparse_point_selection_decodes_coordinates_in_the_original_world_gauge(
+    bundle_scene_factory,
+):
+    scene, _, _ = bundle_scene_factory(count=12, noise_px=0, perturb=False)
+    selected = [scene.points[i].point_id for i in [1, 5, 10]]
+    problem = _Problem(scene, variable_camera_ids=[], variable_point_ids=selected)
+    parameters = problem.initial.copy()
+    shift = np.array([0.03, -0.02, 0.01])
+    parameters[problem.point_start :] += np.tile(shift, len(selected))
+    _, _, points = problem.decode(parameters)
+    for i, point in enumerate(scene.points):
+        expected = problem.positions[i] + (shift if point.point_id in selected else 0)
+        assert_allclose(points[i], expected, atol=1e-15)
 
 
 def test_noisy_refinement_lowers_RMSE_and_preserves_exact_gauge_and_ids(bundle_scene_factory):

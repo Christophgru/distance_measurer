@@ -38,6 +38,24 @@ the default `eigh` explicitly solves the lecture's eigenvalue problem.
 
 ## Calibrate the physical phone with a flat checkerboard
 
+For the P10 measurement workflow, start with the recording intake check after
+capturing the calibration and measurement sessions:
+
+```bash
+.venv/bin/python tools/calibration/intake_capture.py data/raw/CALIBRATION_SESSION \
+  --measurement-session data/raw/MEASUREMENT_SESSION \
+  --output data/processed/CALIBRATION_SESSION/intake
+```
+
+It reserves views before fitting, tests unused corners with frozen intrinsics,
+compares capture settings and saves a training-only candidate only after those
+calibration checks pass. It never starts reconstruction or certifies physical
+accuracy. See [intake contract](../../docs/architecture/calibration_intake.md).
+The defaults match the prepared 9×6-inner-corner, 25 mm target; specify the actual
+square size if printing changes it. The original standalone fitting command
+below remains available for calibration diagnostics without this reserved-view
+audit.
+
 1. Use a rigid, flat, accurately printed checkerboard with a surrounding margin.
    Count **inner corners**, not squares. For example, a 10×7-square board has
    9×6 inner corners. Measure a square edge in meters.

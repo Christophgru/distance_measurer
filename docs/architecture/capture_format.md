@@ -3,6 +3,12 @@
 The capture app writes self-contained folders. Raw recordings remain immutable
 after export; reconstruction outputs belong under `data/processed/`.
 
+P9.1 adds an independently versioned, optional
+[tracking-frame sidecar](tracking_capture_format.md). Python loads and validates
+it without adding preview frames to the still-image event list. Original schema-1
+sessions remain unchanged. App 0.5.0 implements the P9.2 frame writer and periodic
+still scheduler; existing recordings do not acquire preview frames retroactively.
+
 ## Clock domains
 
 Timeline start/end, button requests, and file-save callbacks use Android
@@ -37,6 +43,9 @@ and [Camera2 timestamp clocks](https://developer.android.com/reference/android/h
 
 - `schema_version`, unique `session_id`, `created_at_utc`, and `device` (manufacturer,
   model, Android API, app version).
+  New builds derive `device.app_version` and `device.app_version_code` from the
+  generated Android build configuration. Earlier recordings can have a hardcoded
+  version label; do not infer an installed patch version from that old field.
 - `state`: `recording`, `ending`, `complete`, or `interrupted`. Manual end produces
   `complete`; lifecycle end produces `interrupted` with an explicit `end_reason`.
 - `sensors`: booleans for `accelerometer`, `gyroscope`, and `rotation_vector`,
@@ -47,6 +56,13 @@ and [Camera2 timestamp clocks](https://developer.android.com/reference/android/h
 - `clock_domain`, `image_timestamp_source`, `image_count`, per-type `sensor_counts`,
   and `dropped_sensor_samples`.
 - `sensor_order` and `sensor_reorder_window_ns` describe CSV ordering.
+- App 0.5.1 optionally adds `preview_end`: `decision`, `photo_boundary_ns`,
+  `photo_boundary_source` (`camera_frame` or `callback`),
+  `last_queued_preview_ns`, and `clock_domain`. Null boundaries mean no saved
+  photo/comparable queued preview was available at that decision. Decisions are
+  `following_preview_queued`, `preview_tail_timeout`, `preview_unavailable`,
+  `no_saved_photo`, or `interrupted_end`. This describes writer admission when
+  preview stopping was decided; sidecar finalization establishes storage success.
 
 Metadata is replaced using a synced temporary file and atomic rename where
 supported. Events are flushed individually; sensor output is flushed at least
@@ -147,6 +163,13 @@ for field units, timestamp association, mode behavior and inspection commands.
 `image_request` records accepted button requests; `image_error` records failures.
 `timeline_start` and `timeline_end` delimit the timeline. During end, new requests
 are rejected and sensors keep running until the outstanding capture settles.
+From app 0.5.1, foreground user End additionally keeps analysis running through
+that capture and waits at most 2 s afterwards for a queued, comparable preview
+strictly after the saved photo boundary. A callback boundary is explicit when
+actual exposure is unavailable. Unknown/unavailable preview streams, background
+and destruction stop preview promptly; the JPEG watchdog still bounds capture
+completion separately. A lifecycle event during user End escalates the session
+to interrupted. Analyzer flush precedes timeline closure.
 Then listeners are unregistered, sensor rows are flushed, `timeline_end` is
 written, and final metadata is persisted. Temporary JPEGs are renamed only on
 success. The scene loader should use `image` events as the authoritative list.

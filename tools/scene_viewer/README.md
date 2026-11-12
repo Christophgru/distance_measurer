@@ -1,5 +1,10 @@
 # Browser reconstruction viewer
 
+The separate lightweight endpoint review page uses plain canvas and no renderer
+bundle. Its exporter and interaction test are documented in the
+[measurement workflow](../../docs/architecture/measurement_prototype.md):
+`node tools/scene_viewer/measurement_smoke.mjs /absolute/path/to/index.html`.
+
 The Python exporter embeds this renderer, its dependencies and the scene into
 one offline HTML file. Normal use needs a WebGL 2 browser, not Node, a Python
 GUI backend or a running application server. See
@@ -38,7 +43,10 @@ The smoke test runs offline in Chromium with SwiftShader on headless hosts.
 It checks actual GPU ID picking, stable-ID search, orbit/pan/zoom, filter counts,
 camera focus/view, source photos and mobile layout. It also creates and removes
 a **synthetic** 100,000-point fixture to verify batched rendering. This fixture
-is separate from the user's reconstructed cloud. `browser_smoke.png` is saved
+is separate from the user's reconstructed cloud. The batching check isolates
+the cloud from camera/path/axes draws and requires one draw call for both the
+reconstructed and synthetic clouds, independent of the number of cameras.
+`browser_smoke.png` is saved
 beside the supplied HTML. No particular GPU frame rate is claimed by this test.
 `SCENE_SMOKE_SCREENSHOT=0` skips the optional screenshot when a headless software
 compositor stalls on readback; loading, picking, navigation, filters and mobile

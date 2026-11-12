@@ -12,7 +12,11 @@ def draw_projections(image, rows, searches, *, title):
         if not row["visible"]:
             continue
         pixel = tuple(np.rint(np.asarray(row["predicted_pixel"]) * scale).astype(int))
-        result = matches[row["point_id"]]
+        result = matches.get(row["point_id"])
+        if result is None:
+            # Already verified temporal inliers need no patch search/window.
+            cv2.circle(canvas, pixel, 3, (255, 160, 30), -1)
+            continue
         color = (60, 220, 60) if result["accepted"] else (60, 60, 230)
         cv2.circle(
             canvas, pixel, max(1, round(row["search_radius_px"] * scale)), color, 1, cv2.LINE_AA
